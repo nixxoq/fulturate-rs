@@ -2,6 +2,7 @@ use super::{Module, cobalt::CobaltModule};
 use crate::bot::modules::currency::CurrencyModule;
 use once_cell::sync::Lazy;
 use std::{collections::BTreeMap, sync::Arc};
+use crate::bot::modules::math::MathModule;
 use crate::bot::modules::translate::TranslateModule;
 use crate::bot::modules::whisper::WhisperModule;
 
@@ -11,7 +12,10 @@ pub struct ModuleManager {
 
 impl ModuleManager {
     fn new() -> Self {
-        let modules: Vec<Arc<dyn Module>> = vec![Arc::new(CobaltModule), Arc::new(CurrencyModule), Arc::new(WhisperModule), Arc::new(TranslateModule)];
+        let modules: Vec<Arc<dyn Module>> = vec![
+            Arc::new(CobaltModule), Arc::new(CurrencyModule),
+            Arc::new(WhisperModule), Arc::new(TranslateModule),
+            Arc::new(MathModule)];
 
         let modules = modules
             .into_iter()
