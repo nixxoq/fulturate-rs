@@ -18,16 +18,15 @@ COPY --from=cacher /usr/local/cargo /usr/local/cargo
 RUN cargo build --release --workspace
 
 FROM debian:bookworm-slim AS fulturate-release
-RUN apt-get update && apt-get install -y openssl ca-certificates && ldconfig /usr/local/lib64/
+RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates libfontconfig1 && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
-#COPY --from=builder /app/fulturate/.env /usr/local/bin/fulturate
 COPY --from=builder /app/fulturate/config.json .
 COPY --from=builder /app/fulturate/currencies.json .
 COPY --from=builder /app/target/release/fulturate .
 CMD ["./fulturate"]
 
 FROM debian:bookworm AS api-release
-RUN apt-get update && apt-get install -y openssl ca-certificates && ldconfig /usr/local/lib64/
+RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=builder /app/target/release/fulturate_api .
 EXPOSE 3000

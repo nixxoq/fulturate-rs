@@ -48,14 +48,14 @@ services:
     environment:
       - BOT_TOKEN=7643136153:AAGGOdjQXtBnEUwFqFfvkrvo7AsxNssWzBA
       - GEMINI_API_KEY=AIzaSyDnY18JX8tJpnLFLdWqnQDNoi6RGQqoH4I
-      - OWNERS=[1272299252]
+      - OWNERS=701733705,6452350296
       - MONGODB_URL=mongodb://mongo:27017/?w=majority&journal=true
       - RUST_LOG=info
       - REDIS_URL=redis://redis:6379/
       - COBALT_API_KEY=29451111-02e2-4d59-ac50-f14a20439700
       - LOG_CHAT_ID=-1002822733415
       - ERROR_CHAT_THREAD_ID=-1002822733415
-      - WARN_CHAT_THREAD_ID=0
+      - ARCHIVE_CHAT_ID=-4919496528
 #    env_file:
 #      - ./fulturate/.env
 

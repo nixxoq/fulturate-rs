@@ -31,3 +31,5 @@ md5 = "0.8.0"
 futures = "0.3.31"
 url = "2.5.7"
 eidolon_lang = { git = "https://github.com/Weever1337/eidolon_lang" }
+plotters = "0.3.5"
+image = { version = "0.24", features = ["png"] }

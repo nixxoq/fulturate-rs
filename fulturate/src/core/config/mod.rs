@@ -19,8 +19,7 @@ pub struct Config {
     owners: Vec<String>,
     log_chat_id: String,
     error_chat_thread_id: String,
-    #[allow(dead_code)]
-    warn_chat_thread_id: String,
+    archive_chat_id: String,
     version: String,
     json_config: JsonConfig,
     currency_converter: Arc<CurrencyConverter>,
@@ -77,7 +76,7 @@ impl Config {
             .and_then(|s| s.parse().ok())
             .unwrap_or(0.to_string());
 
-        let warn_chat_thread_id: String = std::env::var("WARN_CHAT_THREAD_ID")
+        let archive_chat_id: String = std::env::var("ARCHIVE_CHAT_ID")
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(0.to_string());
@@ -110,7 +109,7 @@ impl Config {
             owners,
             log_chat_id,
             error_chat_thread_id,
-            warn_chat_thread_id,
+            archive_chat_id,
             version,
             json_config,
             currency_converter,
@@ -144,9 +143,8 @@ impl Config {
         &self.error_chat_thread_id
     }
 
-    #[allow(dead_code)]
-    pub fn get_warn_chat_thread_id(&self) -> &str {
-        &self.warn_chat_thread_id
+    pub fn get_archive_chat_id(&self) -> &str {
+        &self.archive_chat_id
     }
 
     pub fn get_json_config(&self) -> &JsonConfig {
