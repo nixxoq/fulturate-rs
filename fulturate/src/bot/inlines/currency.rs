@@ -2,33 +2,31 @@ use crate::{
     bot::modules::{Owner, currency::CurrencySettings},
     core::{
         config::Config,
-        db::schemas::{settings::Settings},
-        services::currency::converter::CURRENCY_REGEX,
+        db::schemas::settings::Settings,
     },
     errors::MyError,
 };
 use log::{debug, error};
 use std::sync::Arc;
 use teloxide::{
-    Bot,
-    payloads::AnswerInlineQuerySetters,
-    prelude::Requester,
+    prelude::*,
     types::{
-        InlineQuery, InlineQueryResult,
-        InlineQueryResultArticle, InputMessageContent, InputMessageContentText, Me, ParseMode,
+        InlineQuery, InlineQueryResult, InlineQueryResultArticle, InputMessageContent,
+        InputMessageContentText, Me, ParseMode,
     },
+    utils::html::escape,
 };
 use uuid::Uuid;
 
 pub async fn is_currency_query(q: InlineQuery) -> bool {
+    if !q.query.chars().any(|c| c.is_ascii_digit()) {
+        return false;
+    }
+
     let owner = Owner {
         id: q.from.id.to_string(),
         r#type: "user".to_string(),
     };
-
-    if !CURRENCY_REGEX.is_match(&q.query) {
-        return false;
-    }
 
     match Settings::get_module_settings::<CurrencySettings>(&owner, "currency").await {
         Ok(settings) => settings.enabled,
@@ -50,57 +48,36 @@ pub async fn handle_currency_inline(
 ) -> Result<(), MyError> {
     debug!("Handling currency inline query: {}", &q.query);
 
-    let converter = config.get_currency_converter();
-    let text_to_process = &q.query;
-
     let owner = Owner {
         id: q.from.id.to_string(),
-        r#type: "user".to_string(), // hack: inline-query always from user
+        r#type: "user".to_string(),
     };
 
-    // HACK
-    // let pseudo_chat = Chat {
-    //     id: ChatId(q.from.id.0 as i64),
-    //     kind: ChatKind::Private(ChatPrivate {
-    //         first_name: Option::from(q.from.first_name.clone()),
-    //         last_name: q.from.last_name.clone(),
-    //         username: q.from.username.clone(),
-    //     }),
-    // };
-
-    match converter.process_text(text_to_process, &owner).await {
-        Ok(mut results) => {
-            if results.is_empty() {
-                debug!("No currency conversion results for: {}", &q.query);
-                return Ok(());
-            }
-
+    let converter = config.get_currency_converter();
+    match converter.process_text(&q.query, &owner).await {
+        Ok(mut results) if !results.is_empty() => {
             results.truncate(5);
 
             let raw_results = results.join("\n");
 
-            let formatted = results
+            let formatted_blocks: Vec<String> = results
                 .into_iter()
-                .map(|result_block| {
-                    let escaped_block = teloxide::utils::html::escape(&result_block);
-                    format!("<blockquote expandable>{}</blockquote>", escaped_block)
-                })
-                .collect::<Vec<String>>();
-            let final_message = formatted.join("\n");
+                .map(|result_block| format!("<blockquote expandable>{}</blockquote>", escape(&result_block)))
+                .collect();
+
+            let final_message = formatted_blocks.join("\n");
 
             let article = InlineQueryResultArticle::new(
                 Uuid::new_v4().to_string(),
-                "Currency Conversion",
+                "Результат конвертации",
                 InputMessageContent::Text(
                     InputMessageContentText::new(final_message.clone()).parse_mode(ParseMode::Html),
                 ),
             )
-            .description(raw_results);
-
-            let result = InlineQueryResult::Article(article);
+                .description(raw_results);
 
             if let Err(e) = bot
-                .answer_inline_query(q.id, vec![result])
+                .answer_inline_query(q.id, vec![InlineQueryResult::Article(article)])
                 .cache_time(2)
                 .await
             {
@@ -112,6 +89,9 @@ pub async fn handle_currency_inline(
                 "Currency conversion processing error in inline mode: {:?}",
                 e
             );
+        }
+        _ => {
+            debug!("No currency conversion results for: {}", &q.query);
         }
     }
 
