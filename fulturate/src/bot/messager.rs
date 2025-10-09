@@ -35,7 +35,7 @@ pub async fn handle_currency(bot: Bot, message: Message) -> Result<(), MyError> 
     let config = Arc::new(Config::new().await);
 
     task::spawn(async move {
-        let Some(user) = message.from() else { return };
+        let Some(user) = message.from.clone() else { return };
         if message.forward_from_user().is_some_and(|orig| orig.is_bot)
             || user.is_bot
             || message.via_bot.is_some()

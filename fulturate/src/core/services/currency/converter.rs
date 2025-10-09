@@ -162,6 +162,7 @@ pub struct CurrencyConverter {
     client: Client,
     currency_info: HashMap<String, Arc<CurrencyStruct>>,
     all_currencies: Vec<Arc<CurrencyStruct>>,
+    #[warn(dead_code)]
     language: OutputLanguage,
     ton_tickers: Vec<String>,
     ton_addresses: Vec<String>,
@@ -397,14 +398,13 @@ impl CurrencyConverter {
                 }
             };
 
-            if let Some(amount) = parse_amount_or_words(amount_str) {
-                if let Some(info) = self.find_currency_info_by_fuzzy_identifier(identifier_str) {
+            if let Some(amount) = parse_amount_or_words(amount_str)
+                && let Some(info) = self.find_currency_info_by_fuzzy_identifier(identifier_str) {
                     detected_currencies.push(DetectedCurrency {
                         amount,
                         currency_code: info.code.clone(),
                     });
                 }
-            }
         }
 
         Ok(detected_currencies)
