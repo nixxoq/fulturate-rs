@@ -4,7 +4,7 @@ use crate::{
     },
     core::config::Config,
     errors::MyError,
-    util::{enums::AudioStruct, is_admin_or_author, split_text},
+    util::{enums::AudioStruct, split_text},
 };
 use bytes::Bytes;
 use gem_rs::{
@@ -145,27 +145,10 @@ pub async fn summarization_handler(
     bot: Bot,
     query: CallbackQuery,
     config: &Config,
-    user_id: u64,
 ) -> Result<(), MyError> {
     let Some(message) = query.message.and_then(|m| m.regular_message().cloned()) else {
         return Ok(());
     };
-
-    if !is_admin_or_author(
-        &bot,
-        message.chat.id,
-        message.chat.is_group() || message.chat.is_supergroup(),
-        &query.from,
-        user_id,
-    )
-        .await
-    {
-        bot.answer_callback_query(query.id)
-            .text("❌ У вас нет прав использовать эту кнопку!")
-            .show_alert(true)
-            .await?;
-        return Ok(());
-    }
 
     let Some(audio_message_id) = message.reply_to_message().map(|m| m.id.0) else {
         bot.answer_callback_query(query.id)
@@ -246,7 +229,7 @@ pub async fn summarization_handler(
         }
         _ => {
             let error_text = "❌ Не удалось составить краткое содержание.";
-            let retry_keyboard = create_retry_keyboard(audio_message_id, user_id, "summarize", cache_entry.attempt);
+            let retry_keyboard = create_retry_keyboard(audio_message_id, "summarize", cache_entry.attempt);
 
             bot.edit_message_text(
                 message.chat.id,
@@ -272,10 +255,10 @@ async fn get_cached(
 
     if !force_no_cache
         && let Some(cached_text) = cache.get::<TranscriptionCache>(&file_cache_key).await?
-            && !cached_text.full_text.is_empty() {
-                debug!("File cache HIT for unique_id: {}", &file.file_unique_id);
-                return Ok(cached_text);
-            }
+        && !cached_text.full_text.is_empty() {
+        debug!("File cache HIT for unique_id: {}", &file.file_unique_id);
+        return Ok(cached_text);
+    }
 
     let file_data = save_file_to_memory(bot, &file.file_id).await?;
     let transcription = Transcription {
@@ -386,7 +369,7 @@ pub async fn transcription_handler(
                 };
 
                 let original_message_id = msg.id.0;
-                let retry_keyboard = create_retry_keyboard(original_message_id, user.id.0, "transcribe", 0); // can have an error
+                let retry_keyboard = create_retry_keyboard(original_message_id, "transcribe", 0);
 
                 bot.edit_message_text(message.chat.id, message.id, error_text)
                     .reply_markup(retry_keyboard)
@@ -410,21 +393,12 @@ pub async fn retry_speech_handler(
     query: CallbackQuery,
     config: &Config,
     _original_message_id: i32,
-    user_id: u64,
     action_type: &str,
     attempt: u32
 ) -> Result<(), MyError> {
     let Some(message) = query.message.and_then(|m| m.regular_message().cloned()) else {
         return Ok(());
     };
-
-    if query.from.id.0 != user_id {
-        bot.answer_callback_query(query.id)
-            .text("❌ Вы не можете использовать эту кнопку.")
-            .show_alert(true)
-            .await?;
-        return Ok(());
-    }
 
     bot.answer_callback_query(query.id).await?;
 
@@ -489,7 +463,7 @@ pub async fn retry_speech_handler(
                 Ok(cache_entry) => {
                     let text_parts = split_text(&cache_entry.full_text, 4000);
 
-                    let keyboard = create_transcription_keyboard(0, text_parts.len(), user_id);
+                    let keyboard = create_transcription_keyboard(0, text_parts.len(), query.from.id.0);
                     bot.edit_message_text(
                         message.chat.id,
                         message.id,
@@ -512,7 +486,7 @@ pub async fn retry_speech_handler(
                         _ => "❌ Произошла неизвестная ошибка при обработке аудио.".to_string(),
                     };
 
-                    let retry_keyboard = create_retry_keyboard(replied_to_audio_message_id, user_id, "transcribe", new_attempt);
+                    let retry_keyboard = create_retry_keyboard(replied_to_audio_message_id, "transcribe", new_attempt);
 
                     bot.edit_message_text(message.chat.id, message.id, error_text)
                         .reply_markup(retry_keyboard)
@@ -578,7 +552,7 @@ pub async fn retry_speech_handler(
 
                     cache_entry.attempt = new_attempt;
 
-                    let retry_keyboard = create_retry_keyboard(replied_to_audio_message_id, user_id, "summarize", cache_entry.attempt);
+                    let retry_keyboard = create_retry_keyboard(replied_to_audio_message_id, "summarize", cache_entry.attempt);
 
                     bot.edit_message_text(
                         message.chat.id,

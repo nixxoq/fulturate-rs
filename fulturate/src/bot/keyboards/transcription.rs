@@ -8,7 +8,7 @@ pub fn create_transcription_keyboard(
     total_pages: usize,
     user_id: u64,
 ) -> InlineKeyboardMarkup {
-    let summary_button = InlineKeyboardButton::callback("✨", format!("summarize:{}", user_id));
+    let summary_button = InlineKeyboardButton::callback("✨", "summarize".to_string());
     let delete_button = InlineKeyboardButton::callback("🗑️", format!("delete_msg:{}", user_id));
 
     Paginator::new(TRANSCRIPTION_MODULE_KEY, total_pages)
@@ -25,9 +25,9 @@ pub fn create_summary_keyboard() -> InlineKeyboardMarkup {
     )]])
 }
 
-pub fn create_retry_keyboard(message_id: i32, user_id: u64, action_type: &str, attempt: u32) -> InlineKeyboardMarkup {
+pub fn create_retry_keyboard(message_id: i32, action_type: &str, attempt: u32) -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(vec![vec![InlineKeyboardButton::callback(
         "🔁 Повторить попытку",
-        format!("retry_speech:{}:{}:{}:{}", message_id, user_id, action_type, attempt),
+        format!("retry_speech:{}:{}:{}", message_id, action_type, attempt),
     )]/*, delete_message_button(user_id).inline_keyboard.first().unwrap().to_vec()*/])
 }
