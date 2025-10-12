@@ -14,10 +14,19 @@ use crate::{
 use log::error;
 use mongodb::bson::doc;
 use oximod::Model;
+use redis_macros::{FromRedisValue, ToRedisArgs};
+use serde::{Deserialize, Serialize};
 use teloxide::{
     prelude::*,
-    types::{InlineKeyboardButton, InlineKeyboardMarkup, User},
+    types::{InlineKeyboardButton, InlineKeyboardMarkup, MessageEntity, User},
 };
+
+#[derive(Serialize, Deserialize, FromRedisValue, ToRedisArgs)]
+struct RevertState {
+    text: String,
+    entities: Option<Vec<MessageEntity>>,
+    keyboard: Option<InlineKeyboardMarkup>,
+}
 
 async fn has_data_delete_permission(
     bot: &Bot,
@@ -84,7 +93,7 @@ pub async fn handle_delete_data(bot: Bot, query: CallbackQuery) -> Result<(), My
     Ok(())
 }
 
-pub async fn handle_delete_request(bot: Bot, query: CallbackQuery) -> Result<(), MyError> {
+pub async fn handle_delete_request(bot: Bot, query: CallbackQuery, config: &Config) -> Result<(), MyError> {
     let Some(message) = query.message.as_ref().and_then(|m| m.regular_message()) else {
         return Ok(());
     };
@@ -117,6 +126,15 @@ pub async fn handle_delete_request(bot: Bot, query: CallbackQuery) -> Result<(),
             .await?;
         return Ok(());
     }
+
+    let cache = config.get_redis_client();
+    let revert_key = format!("revert_state:{}", message.id);
+    let revert_state = RevertState {
+        text: message.text().unwrap_or_default().to_string(),
+        entities: message.entities().map(|e| e.to_vec()),
+        keyboard: message.reply_markup().cloned(),
+    };
+    cache.set(&revert_key, &revert_state, 600).await?;
 
     bot.answer_callback_query(query.id).await?;
     bot.edit_message_text(
@@ -179,7 +197,34 @@ pub async fn handle_delete_confirmation(
                 .ok();
         }
         "no" => {
-            back_handler(bot, query, config).await?;
+            let cache = config.get_redis_client();
+            let revert_key = format!("revert_state:{}", message.id);
+            let revert_state: Option<RevertState> = cache.get_and_delete(&revert_key).await?;
+
+            if let Some(state) = revert_state {
+                let mut edit_request = bot.edit_message_text(message.chat.id, message.id, state.text);
+                if let Some(keyboard) = state.keyboard {
+                    edit_request = edit_request.reply_markup(keyboard);
+                }
+                if let Some(entities) = state.entities {
+                    edit_request = edit_request.entities(entities);
+                }
+                edit_request.await?;
+            } else {
+                let message_cache_key = format!("message_file_map:{}", message.id);
+                let is_transcription_message = cache
+                    .get::<String>(&message_cache_key)
+                    .await
+                    .is_ok_and(|v| v.is_some());
+
+                if is_transcription_message {
+                    back_handler(bot, query, config).await?;
+                } else {
+                    bot.edit_message_text(message.chat.id, message.id, "✅ Действие отменено.")
+                        .reply_markup(InlineKeyboardMarkup::new(vec![vec![]]))
+                        .await?;
+                }
+            }
         }
         _ => {}
     }
