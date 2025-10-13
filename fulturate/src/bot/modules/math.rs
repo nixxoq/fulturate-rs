@@ -97,8 +97,8 @@ impl Module for MathModule {
     }
 
     fn designed_for(&self, owner_type: &str) -> bool {
-        owner_type == "user"
-    }
+        owner_type == "noone"
+    } // user
 
     async fn is_enabled(&self, owner: &Owner) -> bool {
         if !self.designed_for(&owner.r#type) {
