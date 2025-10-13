@@ -64,6 +64,9 @@ pub enum MyError {
 
     #[error("User not found")]
     UserNotFound,
+
+    #[error("Plotting Error: {0}")]
+    Plotting(String),
 }
 
 impl From<&str> for MyError {

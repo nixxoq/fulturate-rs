@@ -6,11 +6,11 @@ use crate::{
     errors::MyError,
 };
 use log::error;
+use std::sync::Arc;
 use teloxide::{
-    Bot,
-    payloads::SendMessageSetters,
-    requests::Requester,
+    prelude::*,
     types::{Message, ParseMode, ReplyParameters},
+    utils::html::escape,
 };
 use tokio::task;
 
@@ -32,11 +32,10 @@ pub async fn handle_speech(bot: Bot, message: Message) -> Result<(), MyError> {
 }
 
 pub async fn handle_currency(bot: Bot, message: Message) -> Result<(), MyError> {
-    let config = Config::new().await;
+    let config = Arc::new(Config::new().await);
 
     task::spawn(async move {
-        let user = message.from.clone().unwrap();
-
+        let Some(user) = message.from.clone() else { return };
         if message.forward_from_user().is_some_and(|orig| orig.is_bot)
             || user.is_bot
             || message.via_bot.is_some()
@@ -48,27 +47,17 @@ pub async fn handle_currency(bot: Bot, message: Message) -> Result<(), MyError> 
         if let Some(text) = message.text() {
             let owner = Owner {
                 id: message.chat.id.to_string(),
-                r#type: (if message.chat.is_private() {
-                    "user"
-                } else {
-                    "group"
-                })
-                .to_string(),
+                r#type: (if message.chat.is_private() { "user" } else { "group" }).to_string(),
             };
 
             match converter.process_text(text, &owner).await {
-                Ok(mut results) => {
-                    if results.is_empty() {
-                        return;
-                    }
-
+                Ok(mut results) if !results.is_empty() => {
                     results.truncate(5);
 
                     let formatted_blocks: Vec<String> = results
                         .into_iter()
                         .map(|result_block| {
-                            let escaped_block = teloxide::utils::html::escape(&result_block);
-                            format!("<blockquote expandable>{}</blockquote>", escaped_block)
+                            format!("<blockquote expandable>{}</blockquote>", escape(&result_block))
                         })
                         .collect();
 
@@ -85,6 +74,7 @@ pub async fn handle_currency(bot: Bot, message: Message) -> Result<(), MyError> 
                 Err(e) => {
                     error!("Currency conversion processing error: {:?}", e);
                 }
+                _ => {}
             }
         }
     });

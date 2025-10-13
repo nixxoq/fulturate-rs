@@ -1,9 +1,70 @@
-version: '3.8'
-
 services:
-  fulturate:
-    build: .
+  redis:
+    image: redis:latest
+    container_name: fulturate_redis
+    restart: unless-stopped
+    networks:
+      - fulturate-net
     volumes:
-      - ./:/fulturate-rs
-    working_dir: /fulturate-rs
-    command: cargo run
+      - redis_data:/data
+
+  mongo:
+    image: mongo:latest
+    container_name: fulturate_mongo
+    restart: unless-stopped
+    networks:
+      - fulturate-net
+    volumes:
+      - mongo_data:/data/db
+
+  api:
+    build:
+      context: .
+      target: api-release
+    container_name: fulturate_api
+    restart: unless-stopped
+    depends_on:
+      - redis
+    networks:
+      - fulturate-net
+    ports:
+      - "3000:3000" # TODO: can we get this from command-line arguments too?
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - RUST_LOG=info,api=debug
+
+  fulturate:
+    build:
+      context: .
+      target: fulturate-release
+    container_name: fulturate_bot
+    restart: unless-stopped
+    depends_on:
+      - redis
+      - api
+      - mongo
+    networks:
+      - fulturate-net
+    environment:
+      - BOT_TOKEN=7643136153:AAGGOdjQXtBnEUwFqFfvkrvo7AsxNssWzBA
+      - GEMINI_API_KEY=AIzaSyDnY18JX8tJpnLFLdWqnQDNoi6RGQqoH4I
+      - OWNERS=701733705,6452350296
+      - MONGODB_URL=mongodb://mongo:27017/?w=majority&journal=true
+      - RUST_LOG=info
+      - REDIS_URL=redis://redis:6379/
+      - COBALT_API_KEY=29451111-02e2-4d59-ac50-f14a20439700
+      - LOG_CHAT_ID=-1002822733415
+      - ERROR_CHAT_THREAD_ID=-1002822733415
+      - ARCHIVE_CHAT_ID=-4919496528
+#    env_file:
+#      - ./fulturate/.env
+
+volumes:
+  redis_data:
+    driver: local
+  mongo_data:
+    driver: local
+
+networks:
+  fulturate-net:
+    driver: bridge

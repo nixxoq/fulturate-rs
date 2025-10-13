@@ -3,6 +3,7 @@ pub mod currency;
 pub mod registry;
 pub mod whisper;
 pub mod translate;
+pub mod math;
 
 use crate::errors::MyError;
 use async_trait::async_trait;

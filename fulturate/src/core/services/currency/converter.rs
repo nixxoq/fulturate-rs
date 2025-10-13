@@ -15,6 +15,7 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
+use strsim::levenshtein;
 use thiserror::Error;
 use tokio::sync::Mutex;
 
@@ -27,7 +28,7 @@ const TONAPI_URL: &str = "https://tonapi.io/v2/rates";
 pub enum OutputLanguage {
     Russian,
     #[allow(dead_code)]
-    English, // when
+    English,
 }
 
 #[derive(Default)]
@@ -63,78 +64,12 @@ pub enum ConvertError {
     RegexBuildError(String),
 }
 
-fn build_regex_from_config() -> Result<String, ConvertError> {
-    let config_content = fs::read_to_string(CURRENCY_CONFIG_PATH)
-        .map_err(|e| ConvertError::ConfigFileReadError(CURRENCY_CONFIG_PATH.to_string(), e))?;
-
-    let currencies: Vec<CurrencyStruct> = serde_json::from_str(&config_content)
-        .map_err(|e| ConvertError::ConfigFileParseError(CURRENCY_CONFIG_PATH.to_string(), e))?;
-
-    let mut all_patterns = Vec::new();
-    let mut all_symbols = Vec::new();
-
-    for currency in currencies {
-        all_patterns.extend(currency.patterns.iter().cloned());
-        if !currency.symbol.is_empty() {
-            all_symbols.push(currency.symbol.clone());
-        }
-    }
-
-    let escaped_patterns: Vec<String> = all_patterns.iter().map(|p| regex::escape(p)).collect();
-    let escaped_symbols: Vec<String> = all_symbols.iter().map(|s| regex::escape(s)).collect();
-
-    let patterns_part = escaped_patterns.join("|");
-    let symbols_part = escaped_symbols.join("|");
-
-    let multiplier_words_part: String = WORD_VALUES
-        .iter()
-        .filter(|(_, info)| info.is_multiplier)
-        .map(|(word, _)| regex::escape(word))
-        .collect::<Vec<String>>()
-        .join("|");
-
-    let number_words: Vec<String> = WORD_VALUES.keys().map(|s| regex::escape(s)).collect();
-
-    let number_suffixes = r"к|k|м|m|б|b|т|t|тыс|млн|млрд|трлн|kk|кк";
-    let repeatable_digits_part = format!(r"(?:[\d.,_ \t]*(?:[ \t]*(?:{number_suffixes}))?)+");
-
-    let number_pattern_any = format!(
-        r"(?:{}\b|(?:(?:{})\b[ \t]*)+)",
-        repeatable_digits_part,
-        number_words.join("|")
-    );
-
-    let regex_string = format!(
-        concat!(
-            r"(?i)(?:^|\s)(?:",
-            r"({digits})[ \t]+({multiplier})[ \t]*({word_patterns})\b",
-            r"|",
-            r"(?:({multiplier})[ \t]+)?({number})[ \t]*({word_patterns})\b",
-            r"|",
-            r"({symbols})[ \t]*({number})\b",
-            r"|",
-            r"({number})[ \t]*({symbols})",
-            r")",
-        ),
-        digits = repeatable_digits_part,
-        multiplier = multiplier_words_part,
-        number = number_pattern_any,
-        word_patterns = patterns_part,
-        symbols = symbols_part
-    );
-
-    Ok(regex_string)
-}
-
 pub(crate) static CURRENCY_REGEX: Lazy<Regex> = Lazy::new(|| {
-    let regex_string = build_regex_from_config()
-        .map_err(|e| e.to_string())
-        .expect("FATAL: Could not build regex from currency config file.");
-    Regex::new(&regex_string)
-        .unwrap_or_else(|e| panic!("FATAL: Invalid regex generated from config: {}", e))
+    Regex::new(
+        r"(?i)(?:^|\s|[,.;()])((?:[\d.,_]+(?:[ \t]*(?:к|k|м|m|б|b|т|t|тыс|млн|млрд|трлн|kk|кк))?)+|(?:[а-яa-z]+\s*)+?)\s*([a-zA-Zа-яА-ЯёЁ]{2,20})\b|([$€₽₴£¥₺])\s*((?:[\d.,_]+(?:[ \t]*(?:к|k|м|m|б|b|т|t|тыс|млн|млрд|трлн|kk|кк))?)+|(?:[а-яa-z]+\s*)+?)"
+    ).expect("Failed to compile currency regex")
 });
 
-// for combined values like 2k2k2k2k ton
 static COMPONENT_RE: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"(\d+(?:[.,]\d+)?)\s*(кк|kk|k|к|m|м|b|б|t|т|тыс|млн|млрд|трлн)").unwrap()
 });
@@ -225,12 +160,10 @@ pub struct CurrencyStruct {
 pub struct CurrencyConverter {
     cache: Cache,
     client: Client,
-    currency_info: HashMap<String, CurrencyStruct>,
-    // target_currencies: Vec<String>,
-    #[allow(dead_code)]
-    language: OutputLanguage, // when
-
-    // for fucking ton api
+    currency_info: HashMap<String, Arc<CurrencyStruct>>,
+    all_currencies: Vec<Arc<CurrencyStruct>>,
+    #[warn(dead_code)]
+    language: OutputLanguage,
     ton_tickers: Vec<String>,
     ton_addresses: Vec<String>,
     ton_ticker_to_code: HashMap<String, String>, // <"ton", "TON">
@@ -260,35 +193,38 @@ impl CurrencyConverter {
             .map_err(|e| ConvertError::ConfigFileParseError(config_path_str.to_string(), e))?;
 
         let mut currency_map = HashMap::new();
+        let mut all_currencies_vec = Vec::new();
 
-        // for fucking ton api
         let mut ton_tickers = Vec::new();
         let mut ton_addresses = Vec::new();
         let mut ton_ticker_to_code = HashMap::new();
         let mut ton_address_to_code = HashMap::new();
 
         for currency in currencies {
-            if currency.source == "tonapi"
-                && let Some(identifier) = &currency.api_identifier
+            let arc_currency = Arc::new(currency);
+            if arc_currency.source == "tonapi"
+                && let Some(identifier) = &arc_currency.api_identifier
             {
                 if identifier.len() > 10
                     && (identifier.starts_with("EQ") || identifier.starts_with("UQ"))
                 {
                     ton_addresses.push(identifier.clone());
-                    ton_address_to_code.insert(identifier.clone(), currency.code.clone());
+                    ton_address_to_code.insert(identifier.clone(), arc_currency.code.clone());
                 } else {
                     let lower_ticker = identifier.to_lowercase();
                     ton_tickers.push(lower_ticker.clone());
-                    ton_ticker_to_code.insert(lower_ticker, currency.code.clone());
+                    ton_ticker_to_code.insert(lower_ticker, arc_currency.code.clone());
                 }
             }
-            currency_map.insert(currency.code.clone(), currency);
+            currency_map.insert(arc_currency.code.clone(), Arc::clone(&arc_currency));
+            all_currencies_vec.push(arc_currency);
         }
 
         Ok(CurrencyConverter {
             cache: Arc::new(Mutex::new(None)),
             client: Client::new(),
             currency_info: currency_map,
+            all_currencies: all_currencies_vec,
             language,
             ton_tickers,
             ton_addresses,
@@ -312,7 +248,6 @@ impl CurrencyConverter {
             .await?;
 
         let parsed = response.json::<TonApiResponse>().await?;
-
         let mut crypto_rates = HashMap::new();
 
         parsed
@@ -442,70 +377,37 @@ impl CurrencyConverter {
         &self,
         text: &str,
     ) -> Result<Vec<DetectedCurrency>, ConvertError> {
-        let parse_amount_or_words = |amount_str: &str| -> Option<f64> {
-            let first_char = amount_str.chars().next();
-            if first_char.is_some_and(|c| c.is_alphabetic() && c.to_lowercase().next() != Some('a'))
-            {
-                Self::parse_number_words(amount_str)
+        let mut detected_currencies = Vec::new();
+
+        for cap in CURRENCY_REGEX.captures_iter(text) {
+            let (amount_str, identifier_str) = if let (Some(num), Some(currency)) = (cap.get(1), cap.get(2)) {
+                (num.as_str(), currency.as_str())
+            } else if let (Some(currency_symbol), Some(num)) = (cap.get(3), cap.get(4)) {
+                (num.as_str(), currency_symbol.as_str())
             } else {
-                Self::parse_amount_with_suffix(amount_str)
-            }
-        };
+                continue;
+            };
 
-        let currencies = CURRENCY_REGEX
-            .captures_iter(text)
-            .filter_map(|cap| {
-                let (amount, identifier_str) =
-                    // {num} {multiplier} {symbol}
-                    if let (Some(num_str), Some(multiplier_match), Some(identifier)) =
-                        (cap.get(1), cap.get(2), cap.get(3))
-                    {
-                        let base_amount = Self::parse_amount_with_suffix(num_str.as_str().trim())?;
-                        let multiplier_value = WORD_VALUES
-                            .get(multiplier_match.as_str().to_lowercase().as_str())?
-                            .value;
-                        Some((base_amount * multiplier_value, identifier.as_str().trim()))
-                    }
+            let parse_amount_or_words = |s: &str| -> Option<f64> {
+                let trimmed = s.trim();
+                let first_char = trimmed.chars().next();
+                if first_char.is_some_and(|c| c.is_alphabetic()) {
+                    Self::parse_number_words(trimmed)
+                } else {
+                    Self::parse_amount_with_suffix(trimmed)
+                }
+            };
 
-                    // {num}{symbol} with hidden {multiplier}
-                    else if let (Some(num_str), Some(identifier)) = (cap.get(5), cap.get(6)) {
-                        let base_amount = parse_amount_or_words(num_str.as_str().trim())?;
+            if let Some(amount) = parse_amount_or_words(amount_str)
+                && let Some(info) = self.find_currency_info_by_fuzzy_identifier(identifier_str) {
+                    detected_currencies.push(DetectedCurrency {
+                        amount,
+                        currency_code: info.code.clone(),
+                    });
+                }
+        }
 
-                        // check multiplier
-                        let final_amount = if let Some(multiplier_match) = cap.get(4) {
-                            let multiplier_value = WORD_VALUES
-                                .get(multiplier_match.as_str().to_lowercase().as_str())?
-                                .value;
-                            base_amount * multiplier_value
-                        } else {
-                            base_amount
-                        };
-
-                        Some((final_amount, identifier.as_str().trim()))
-                    }
-                    // {symbol}{num}
-                    else if let (Some(identifier), Some(amount_str)) = (cap.get(7), cap.get(8)) {
-                        let amount = parse_amount_or_words(amount_str.as_str().trim())?;
-                        Some((amount, identifier.as_str()))
-                    }
-                    // {num}{symbol}
-                    else if let (Some(amount_str), Some(identifier)) = (cap.get(9), cap.get(10)) {
-                        let amount = parse_amount_or_words(amount_str.as_str().trim())?;
-                        Some((amount, identifier.as_str()))
-                    } else {
-                        None
-                    }?;
-
-                let info = self.find_currency_info_by_identifier(identifier_str)?;
-
-                Some(DetectedCurrency {
-                    amount,
-                    currency_code: info.code.clone(),
-                })
-            })
-            .collect();
-
-        Ok(currencies)
+        Ok(detected_currencies)
     }
 
     pub fn parse_amount_with_suffix(amount_str: &str) -> Option<f64> {
@@ -546,7 +448,6 @@ impl CurrencyConverter {
             }
         };
 
-        // single pattern check ($1k200)
         if let Some(caps) = INFIX_K_RE.captures(&number_part_str) {
             let before_k_str = caps.get(1).unwrap().as_str();
             let after_k_str = caps.get(2).unwrap().as_str();
@@ -593,18 +494,39 @@ impl CurrencyConverter {
             .or_else(|| number_part_str.parse::<f64>().ok())
     }
 
-    fn find_currency_info(&self, code: &str) -> Option<&CurrencyStruct> {
-        self.currency_info.get(code)
+    fn find_currency_info(&self, code: &str) -> Option<Arc<CurrencyStruct>> {
+        self.currency_info.get(code).cloned()
     }
 
-    fn find_currency_info_by_identifier(&self, identifier: &str) -> Option<&CurrencyStruct> {
-        let lower_identifier = identifier.to_lowercase().replace(['.', ' '], "");
-        self.currency_info.values().find(|info| {
-            info.patterns
-                .iter()
-                .any(|p| p.to_lowercase().replace(['.', ' '], "") == lower_identifier)
-                || info.symbol == identifier
-        })
+    fn find_currency_info_by_fuzzy_identifier(&self, identifier: &str) -> Option<Arc<CurrencyStruct>> {
+        let lower_identifier = identifier.to_lowercase();
+        let mut best_match: Option<(usize, Arc<CurrencyStruct>)> = None;
+
+        for currency_info in &self.all_currencies {
+            if !currency_info.symbol.is_empty() && currency_info.symbol == identifier {
+                return Some(Arc::clone(currency_info));
+            }
+
+            for pattern in &currency_info.patterns {
+                let distance = levenshtein(&lower_identifier, &pattern.to_lowercase());
+
+                let threshold = if pattern.len() <= 3 { 0 } else { (pattern.len() as f32 / 3.5).floor() as usize };
+
+                if distance <= threshold {
+                    match best_match {
+                        Some((best_dist, _)) if distance < best_dist => {
+                            best_match = Some((distance, Arc::clone(currency_info)));
+                        }
+                        None => {
+                            best_match = Some((distance, Arc::clone(currency_info)));
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        best_match.map(|(_, info)| info)
     }
 
     fn convert_amount(
