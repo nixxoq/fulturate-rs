@@ -1,3 +1,5 @@
+use crate::bot::inlines::math::{handle_math_inline, is_math_query};
+use crate::bot::inlines::translate::{handle_translate_inline, is_translate_query};
 use crate::{
     bot::{
         callbacks::callback_query_handlers,
@@ -7,7 +9,7 @@ use crate::{
             currency::{handle_currency_inline, is_currency_query},
             whisper::{handle_whisper_inline, is_whisper_query},
         },
-        keyboards::delete::delete_message_button,
+        keyboards::delete::{delete_message_button, delete_message_button_no_confirm},
         messager::{handle_currency, handle_speech},
         messages::chat::handle_bot_added,
         modules::{Owner, registry::MOD_MANAGER},
@@ -41,8 +43,6 @@ use teloxide::{
     update_listeners::Polling,
     utils::{command::BotCommands, html},
 };
-use crate::bot::inlines::math::{handle_math_inline, is_math_query};
-use crate::bot::inlines::translate::{handle_translate_inline, is_translate_query};
 
 async fn root_handler(
     update: Update,
@@ -296,7 +296,7 @@ pub async fn handle_error(err: Arc<MyError>, update: Update, config: Arc<Config>
             .send_document(chat_id, document)
             .caption(message_text)
             .parse_mode(ParseMode::Html)
-            .reply_markup(delete_message_button(72))
+            .reply_markup(delete_message_button_no_confirm(72))
             .message_thread_id(ThreadId(MessageId(error_thread_id)))
             .await
         {

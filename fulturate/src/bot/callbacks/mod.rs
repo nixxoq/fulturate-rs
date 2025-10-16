@@ -1,3 +1,4 @@
+use crate::core::services::speech_recognition::retry_speech_handler;
 use crate::{
     bot::{
         callbacks::{
@@ -25,7 +26,6 @@ use teloxide::{
     payloads::{AnswerCallbackQuerySetters, EditMessageTextSetters},
     prelude::{CallbackQuery, Requester},
 };
-use crate::core::services::speech_recognition::retry_speech_handler;
 
 pub mod cobalt_pagination;
 pub mod delete;
@@ -55,7 +55,7 @@ enum CallbackAction<'a> {
     CobaltPagination,
     DeleteDataConfirmation,
     DeleteMessage,
-    DeleteConfirmation,
+    DeleteMessageConfirmation,
     Summarize,
     RetrySpeech {
         message_id: i32,
@@ -139,7 +139,7 @@ fn parse_callback_data(data: &'_ str) -> Option<CallbackAction<'_>> {
         return Some(CallbackAction::DeleteMessage);
     }
     if data.starts_with("delete_confirm:") {
-        return Some(CallbackAction::DeleteConfirmation);
+        return Some(CallbackAction::DeleteMessageConfirmation);
     }
     if data == "summarize" {
         return Some(CallbackAction::Summarize);
@@ -153,7 +153,7 @@ fn parse_callback_data(data: &'_ str) -> Option<CallbackAction<'_>> {
             return Some(CallbackAction::RetrySpeech {
                 message_id,
                 action_type: parts[1],
-                attempt
+                attempt,
             });
         }
     }
@@ -185,11 +185,11 @@ pub async fn callback_query_handlers(bot: Bot, q: CallbackQuery) -> Result<(), M
 
     match parse_callback_data(data) {
         Some(CallbackAction::ModuleSelect {
-                 owner_type,
-                 owner_id,
-                 module_key,
-                 commander_id,
-             }) => {
+            owner_type,
+            owner_id,
+            module_key,
+            commander_id,
+        }) => {
             info!(
                 "module_select: id: {} | commander_id: {}",
                 q.from.clone().id.0,
@@ -216,10 +216,10 @@ pub async fn callback_query_handlers(bot: Bot, q: CallbackQuery) -> Result<(), M
             }
         }
         Some(CallbackAction::SettingsBack {
-                 owner_type,
-                 owner_id,
-                 commander_id,
-             }) => {
+            owner_type,
+            owner_id,
+            commander_id,
+        }) => {
             info!(
                 "settings_back: id: {} | commander_id: {}",
                 q.from.clone().id.0,
@@ -240,14 +240,14 @@ pub async fn callback_query_handlers(bot: Bot, q: CallbackQuery) -> Result<(), M
                     owner_type.to_string(),
                     commander_id,
                 )
-                    .await?;
+                .await?;
             }
         }
         Some(CallbackAction::ModuleSettings {
-                 module_key,
-                 rest,
-                 commander_id,
-             }) => {
+            module_key,
+            rest,
+            commander_id,
+        }) => {
             info!(
                 "module_settings: id: {} | commander_id: {}",
                 q.from.clone().id.0,
@@ -269,7 +269,7 @@ pub async fn callback_query_handlers(bot: Bot, q: CallbackQuery) -> Result<(), M
                     } else {
                         "group"
                     })
-                        .to_string(),
+                    .to_string(),
                 };
                 module
                     .handle_callback(bot, &q, &owner, rest, commander_id)
@@ -291,11 +291,15 @@ pub async fn callback_query_handlers(bot: Bot, q: CallbackQuery) -> Result<(), M
             handle_delete_data_confirmation(bot, q).await?
         }
         Some(CallbackAction::DeleteMessage) => handle_delete_request(bot, q, &config).await?,
-        Some(CallbackAction::DeleteConfirmation) => {
+        Some(CallbackAction::DeleteMessageConfirmation) => {
             handle_delete_confirmation(bot, q, &config).await?
         }
         Some(CallbackAction::Summarize) => summarization_handler(bot, q, &config).await?,
-        Some(CallbackAction::RetrySpeech { message_id, action_type, attempt }) => {
+        Some(CallbackAction::RetrySpeech {
+            message_id,
+            action_type,
+            attempt,
+        }) => {
             retry_speech_handler(bot, q.clone(), &config, message_id, action_type, attempt).await?
         }
         Some(CallbackAction::SpeechPage) => pagination_handler(bot, q, &config).await?,

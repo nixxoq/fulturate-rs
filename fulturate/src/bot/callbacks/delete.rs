@@ -93,7 +93,11 @@ pub async fn handle_delete_data(bot: Bot, query: CallbackQuery) -> Result<(), My
     Ok(())
 }
 
-pub async fn handle_delete_request(bot: Bot, query: CallbackQuery, config: &Config) -> Result<(), MyError> {
+pub async fn handle_delete_request(
+    bot: Bot,
+    query: CallbackQuery,
+    config: &Config,
+) -> Result<(), MyError> {
     let Some(message) = query.message.as_ref().and_then(|m| m.regular_message()) else {
         return Ok(());
     };
@@ -101,14 +105,22 @@ pub async fn handle_delete_request(bot: Bot, query: CallbackQuery, config: &Conf
         return Ok(());
     };
 
-    let target_user_id_str = data.strip_prefix("delete_msg:").unwrap_or_default();
-    let Ok(target_user_id) = target_user_id_str.parse::<u64>() else {
+    let payload = data.strip_prefix("delete_msg:").unwrap_or_default();
+    let parts: Vec<&str> = payload.split(':').collect();
+
+    if parts.is_empty() || parts.len() > 2 {
+        return Ok(());
+    }
+
+    let Ok(target_user_id) = parts[0].parse::<u64>() else {
         bot.answer_callback_query(query.id)
             .text("❌ Ошибка: неверный ID в кнопке.")
             .show_alert(true)
             .await?;
         return Ok(());
     };
+
+    let with_confirmation = parts.get(1).map_or(true, |&flag| flag == "1");
 
     let can_delete = is_admin_or_author(
         &bot,
@@ -127,23 +139,31 @@ pub async fn handle_delete_request(bot: Bot, query: CallbackQuery, config: &Conf
         return Ok(());
     }
 
-    let cache = config.get_redis_client();
-    let revert_key = format!("revert_state:{}", message.id);
-    let revert_state = RevertState {
-        text: message.text().unwrap_or_default().to_string(),
-        entities: message.entities().map(|e| e.to_vec()),
-        keyboard: message.reply_markup().cloned(),
-    };
-    cache.set(&revert_key, &revert_state, 600).await?;
-
     bot.answer_callback_query(query.id).await?;
-    bot.edit_message_text(
-        message.chat.id,
-        message.id,
-        "Вы уверены, что хотите удалить?",
-    )
-    .reply_markup(confirm_delete_keyboard(target_user_id))
-    .await?;
+
+    if with_confirmation {
+        let cache = config.get_redis_client();
+        let revert_key = format!("revert_state:{}", message.id);
+        let revert_state = RevertState {
+            text: message.text().unwrap_or_default().to_string(),
+            entities: message.entities().map(|e| e.to_vec()),
+            keyboard: message.reply_markup().cloned(),
+        };
+        cache.set(&revert_key, &revert_state, 600).await?;
+
+        bot.edit_message_text(
+            message.chat.id,
+            message.id,
+            "Вы уверены, что хотите удалить?",
+        )
+        .reply_markup(confirm_delete_keyboard(target_user_id))
+        .await?;
+    } else {
+        bot.delete_message(message.chat.id, message.id)
+            .await
+            .map_err(|e| error!("Failed to delete message without confirmation: {:?}", e))
+            .ok();
+    }
 
     Ok(())
 }
@@ -202,7 +222,8 @@ pub async fn handle_delete_confirmation(
             let revert_state: Option<RevertState> = cache.get_and_delete(&revert_key).await?;
 
             if let Some(state) = revert_state {
-                let mut edit_request = bot.edit_message_text(message.chat.id, message.id, state.text);
+                let mut edit_request =
+                    bot.edit_message_text(message.chat.id, message.id, state.text);
                 if let Some(keyboard) = state.keyboard {
                     edit_request = edit_request.reply_markup(keyboard);
                 }
