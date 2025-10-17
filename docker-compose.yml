@@ -33,6 +33,23 @@ services:
       - REDIS_URL=redis://redis:6379
       - RUST_LOG=info,api=debug
 
+  telegram_api:
+    image: aiogram/telegram-bot-api:latest
+    container_name: fulturate_telegram_api
+    restart: unless-stopped
+    networks:
+      - fulturate-net
+    ports:
+      - "8081:8081"
+    environment:
+      # https://my.telegram.org | https://github.com/aiogram/telegram-bot-api
+      - TELEGRAM_API_ID=28090001
+      - TELEGRAM_API_HASH=a38cfe08329526d8cb130acbdddacbbd
+      - TELEGRAM_LOCAL=1
+      # - TELEGRAM_STAT=1
+    volumes:
+      - telegram_bot_api_data:/var/lib/telegram-bot-api
+
   fulturate:
     build:
       context: .
@@ -43,6 +60,7 @@ services:
       - redis
       - api
       - mongo
+      - telegram_api
     networks:
       - fulturate-net
     environment:
@@ -52,10 +70,11 @@ services:
       - MONGODB_URL=mongodb://mongo:27017/?w=majority&journal=true
       - RUST_LOG=info
       - REDIS_URL=redis://redis:6379/
-      - COBALT_API_KEY=29451111-02e2-4d59-ac50-f14a20439700
+      - COBALT_API_KEY=3093a2c7-c1de-43f5-8ec0-96204d67d101
       - LOG_CHAT_ID=-1002822733415
       - ERROR_CHAT_THREAD_ID=-1002822733415
       - ARCHIVE_CHAT_ID=-4919496528
+      - TELEGRAM_API_URL=http://telegram_api:8081
 #    env_file:
 #      - ./fulturate/.env
 
@@ -63,6 +82,8 @@ volumes:
   redis_data:
     driver: local
   mongo_data:
+    driver: local
+  telegram_bot_api_data:
     driver: local
 
 networks:

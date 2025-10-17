@@ -30,6 +30,7 @@ pub struct Config {
 impl Config {
     pub async fn new() -> Self {
         dotenv().ok();
+        let version = env!("CARGO_PKG_VERSION").to_string();
 
         let Ok(bot_token) = std::env::var("BOT_TOKEN") else {
             error!("Expected BOT_TOKEN env var");
@@ -39,12 +40,14 @@ impl Config {
             error!("COBALT_API_KEY expected");
             std::process::exit(1);
         };
-        // let Ok(version) = std::env::var("CARGO_PKG_VERSION") else {
-        //     error!("CARGO_PKG_VERSION expected");
-        //     std::process::exit(1);
-        // };
-        let version = env!("CARGO_PKG_VERSION").to_string();
-        let bot = Bot::new(bot_token);
+
+        let Ok(telegram_api_url) = std::env::var("TELEGRAM_API_URL") else {
+            error!("TELEGRAM_API_URL expected");
+            std::process::exit(1);
+        };
+
+        let url = reqwest::Url::parse(&telegram_api_url).unwrap();
+        let bot = Bot::new(bot_token).set_api_url(url);
 
         let cobalt_client = ccobalt::Client::builder()
             .base_url("https://cobalt-backend.canine.tools/")
@@ -82,7 +85,6 @@ impl Config {
             .unwrap_or(0.to_string());
 
         let Ok(json_config) = read_json_config("config.json") else {
-            // todo: remove JsonConfig because useless when we will get /settings
             error!("Unable to read config.json");
             std::process::exit(1);
         };

@@ -190,11 +190,13 @@ pub async fn handle_inline_video(
             let media = InputMedia::Video(InputMediaVideo::new(InputFile::url(url.parse()?)));
             let url_kb = make_single_url_keyboard(&original_url);
 
+            println!("url: {}", url);
             if let Err(_e) = bot
                 .edit_message_media_inline(&inline_message_id, media)
                 .reply_markup(url_kb)
                 .await
             {
+                println!("Failed to send video: {:?}", _e);
                 bot.edit_message_text_inline(
                     inline_message_id,
                     "❌ Ошибка: не удалось отправить видео.",
