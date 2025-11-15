@@ -67,6 +67,9 @@ pub enum MyError {
 
     #[error("Plotting Error: {0}")]
     Plotting(String),
+
+    #[error("I/O error: {0}")]
+    Io(#[from] std::io::Error),
 }
 
 impl From<&str> for MyError {

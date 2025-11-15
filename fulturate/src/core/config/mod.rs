@@ -51,7 +51,11 @@ impl Config {
 
         let cobalt_client = ccobalt::Client::builder()
             .base_url("https://cobalt-backend.canine.tools/")
+            // .base_url("http://127.0.0.1:9000")
+            // .base_url("https://nixxo.local/")
+            // .no_api_key(true)
             .api_key(cobalt_api_key)
+            // .api_key("ea4837b1-a06f-48b8-af62-0a7c263a2e18")
             .user_agent(
                 "Fulturate/6.6.6 (rust) (+https://github.com/weever1337/fulturate-rs)".to_string(),
             )

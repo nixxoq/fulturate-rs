@@ -38,9 +38,19 @@ pub enum DownloadResult {
     Video {
         url: String,
         original_url: String,
+        filename: Option<String>,
     },
     Photos {
         urls: Vec<String>,
+        original_url: String,
+    },
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub enum CobaltCache {
+    Pending(DownloadResult),
+    Ready {
+        file_id: String,
         original_url: String,
     },
 }
@@ -83,6 +93,7 @@ pub async fn resolve_download_url(
                 return Ok(Some(DownloadResult::Video {
                     url: video_item.url.clone(),
                     original_url: url.to_string(),
+                    filename: None,
                 }));
             }
             Ok(None)
@@ -109,6 +120,7 @@ pub async fn resolve_download_url(
                 Ok(Some(DownloadResult::Video {
                     url: c_url,
                     original_url: url.to_string(),
+                    filename: Some(filename),
                 }))
             }
         }
@@ -117,6 +129,7 @@ pub async fn resolve_download_url(
             .map(|c_url| DownloadResult::Video {
                 url: c_url,
                 original_url: url.to_string(),
+                filename: None,
             })),
     }
 }
