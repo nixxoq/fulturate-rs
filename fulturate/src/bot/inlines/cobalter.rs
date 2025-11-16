@@ -14,6 +14,7 @@ use ccobalt::model::request::{DownloadRequest, FilenameStyle};
 use once_cell::sync::Lazy;
 use regex::Regex;
 use std::{path::PathBuf, sync::Arc};
+use serde::Deserialize;
 use teloxide::{
     prelude::*,
     types::{
@@ -23,6 +24,7 @@ use teloxide::{
     },
 };
 use tokio::fs;
+use tokio::process::Command;
 
 static URL_REGEX: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"^(https?)://[^\s/$.?#].[^\s]*$").unwrap());
@@ -35,6 +37,36 @@ impl Drop for TempGuard {
     fn drop(&mut self) {
         if let Err(e) = std::fs::remove_file(&self.path) {
             log::error!("Failed to delete temp file {:?}: {}", self.path, e);
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct FfprobeOutput {
+    streams: Vec<Stream>,
+}
+
+#[derive(Deserialize)]
+struct Stream {
+    codec_type: String,
+    width: Option<i32>,
+    height: Option<i32>,
+    #[serde(with = "duration_parser")]
+    duration: Option<f64>,
+}
+
+mod duration_parser {
+    use serde::{self, Deserialize, Deserializer};
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<f64>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s: Option<&str> = Option::deserialize(deserializer)?;
+        if let Some(s) = s {
+            s.parse::<f64>().map(Some).map_err(serde::de::Error::custom)
+        } else {
+            Ok(None)
         }
     }
 }
@@ -232,15 +264,49 @@ pub async fn handle_inline_video(
             fs::create_dir_all(&temp).await?;
 
             let client = config.get_cobalt_client();
-            let path = client
-                .download_and_save(&cobalt_req, url_hash, temp)
-                .await?;
-            let _file_guard = TempGuard { path: path.clone() };
+            let video_path = client.download_and_save(&cobalt_req, url_hash, temp).await?;
+            let _video_guard = TempGuard { path: video_path.clone() };
+
+            let ffprobe_output = Command::new("ffprobe")
+                .args([
+                    "-v", "quiet",
+                    "-print_format", "json",
+                    "-show_streams",
+                    video_path.to_str().unwrap(),
+                ])
+                .output().await?;
+
+            let metadata: FfprobeOutput = serde_json::from_slice(&ffprobe_output.stdout)?;
+            let video_stream = metadata.streams.iter().find(|s| s.codec_type == "video");
+            let (duration, width, height) = if let Some(stream) = video_stream {
+                (
+                    stream.duration.unwrap_or(0.0) as u32,
+                    stream.width.unwrap_or(0),
+                    stream.height.unwrap_or(0),
+                )
+            } else {
+                (0, 0, 0)
+            };
+
+            let thumb_path = video_path.with_extension("jpg");
+            Command::new("ffmpeg")
+                .args([
+                    "-i", video_path.to_str().unwrap(),
+                    "-ss", "00:00:01.000",
+                    "-vframes", "1",
+                    thumb_path.to_str().unwrap(),
+                ])
+                .status().await?;
+
+            let _thumb_guard = TempGuard { path: thumb_path.clone() };
 
             let log_channel = ChatId(config.get_log_chat_id().parse().unwrap());
             let msg = bot
-                .send_video(log_channel, InputFile::file(path))
-                .duration(6666)
+                .send_video(log_channel, InputFile::file(&video_path))
+                .thumbnail(InputFile::file(&thumb_path))
+                .duration(duration)
+                .width(width as u32)
+                .height(height as u32)
                 .await?;
 
             let video = msg.video().ok_or("Failed to get video from message")?;
