@@ -52,6 +52,10 @@ pub enum CobaltCache {
     Ready {
         file_id: String,
         original_url: String,
+        duration: u32,
+        width: u32,
+        height: u32,
+        thumb_file_id: String,
     },
 }
 
