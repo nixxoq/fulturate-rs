@@ -6,7 +6,9 @@ use crate::{
     core::{
         config::Config,
         db::schemas::settings::Settings,
-        services::cobalt::{CobaltCache, DownloadResult, resolve_download_url},
+        services::cobalt::{
+            AudioQuality, CobaltCache, DownloadResult, VideoQuality, resolve_download_url,
+        },
     },
     errors::MyError,
 };
@@ -45,14 +47,11 @@ mod video_metadata {
     use std::path::{Path, PathBuf};
     use tokio::process::Command;
 
-    const USER_AGENT: &str = "Fulturate/6.6.6 (rust) (+https://github.com/weever1337/fulturate-rs)";
-
     #[derive(Debug, Clone)]
     pub struct VideoMetadata {
         pub duration: u32,
         pub width: u32,
         pub height: u32,
-        pub thumbnail: String,
     }
 
     #[derive(Deserialize)]
@@ -80,7 +79,7 @@ mod video_metadata {
             duration: metadata.duration.unwrap_or(0.0) as u32,
             width: metadata.width.unwrap_or(0),
             height: metadata.height.unwrap_or(0),
-            thumbnail: metadata.thumbnail.unwrap_or_default(),
+            // thumbnail: metadata.thumbnail.unwrap_or_default(),
         })
     }
 
@@ -300,18 +299,15 @@ pub async fn handle_inline_video(
                 url: original_url.clone(),
                 filename_style: Some(FilenameStyle::Pretty),
                 video_quality: Some(match settings.video_quality {
-                    crate::core::services::cobalt::VideoQuality::Q720 => {
-                        ccobalt::model::request::VideoQuality::Q720
-                    }
-                    crate::core::services::cobalt::VideoQuality::Q1080 => {
-                        ccobalt::model::request::VideoQuality::Q1080
-                    }
-                    crate::core::services::cobalt::VideoQuality::Q1440 => {
-                        ccobalt::model::request::VideoQuality::Q1440
-                    }
-                    crate::core::services::cobalt::VideoQuality::Max => {
-                        ccobalt::model::request::VideoQuality::Max
-                    }
+                    VideoQuality::Q720 => ccobalt::model::request::VideoQuality::Q720,
+                    VideoQuality::Q1080 => ccobalt::model::request::VideoQuality::Q1080,
+                    VideoQuality::Q1440 => ccobalt::model::request::VideoQuality::Q1440,
+                    VideoQuality::Max => ccobalt::model::request::VideoQuality::Max,
+                }),
+                audio_bitrate: Some(match settings.audio_quality {
+                    AudioQuality::K128 => ccobalt::model::request::AudioBitrate::Kbps128,
+                    AudioQuality::K256 => ccobalt::model::request::AudioBitrate::Kbps256,
+                    AudioQuality::K320 => ccobalt::model::request::AudioBitrate::Kbps320,
                 }),
                 ..Default::default()
             };

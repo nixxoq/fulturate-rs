@@ -33,6 +33,38 @@ impl VideoQuality {
     }
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub enum AudioQuality {
+    K128,
+    K256,
+    K320,
+}
+
+impl Default for AudioQuality {
+    fn default() -> AudioQuality {
+        AudioQuality::K256
+    }
+}
+
+impl AudioQuality {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            AudioQuality::K128 => "128",
+            AudioQuality::K256 => "256",
+            AudioQuality::K320 => "320",
+        }
+    }
+
+    pub fn parse_quality(s: &str) -> Self {
+        match s {
+            "128" => AudioQuality::K128,
+            "256" => AudioQuality::K256,
+            "320" => AudioQuality::K320,
+            _ => AudioQuality::K256,
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum DownloadResult {
     Video {
@@ -72,6 +104,11 @@ pub async fn resolve_download_url(
             VideoQuality::Q1080 => ccobalt::model::request::VideoQuality::Q1080,
             VideoQuality::Q1440 => ccobalt::model::request::VideoQuality::Q1440,
             VideoQuality::Max => ccobalt::model::request::VideoQuality::Max,
+        }),
+        audio_bitrate: Some(match settings.audio_quality {
+            AudioQuality::K128 => ccobalt::model::request::AudioBitrate::Kbps128,
+            AudioQuality::K256 => ccobalt::model::request::AudioBitrate::Kbps256,
+            AudioQuality::K320 => ccobalt::model::request::AudioBitrate::Kbps320,
         }),
         ..Default::default()
     };
