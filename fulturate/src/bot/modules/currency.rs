@@ -4,7 +4,9 @@ use crate::{
         db::schemas::{group::Group, settings::Settings, user::User},
         services::{
             currencier::handle_currency_update,
-            currency::converter::{get_all_currency_codes, get_default_currencies, CURRENCY_CONFIG_PATH},
+            currency::converter::{
+                CURRENCY_CONFIG_PATH, get_all_currency_codes, get_default_currencies,
+            },
         },
     },
     errors::MyError,
@@ -26,7 +28,12 @@ pub struct CurrencySettings {
 impl Default for CurrencySettings {
     fn default() -> Self {
         let default_currencies = get_default_currencies()
-            .map(|currencies| currencies.into_iter().map(|c| c.code).collect::<Vec<String>>())
+            .map(|currencies| {
+                currencies
+                    .into_iter()
+                    .map(|c| c.code)
+                    .collect::<Vec<String>>()
+            })
             .unwrap_or_else(|_| vec!["usd".to_string(), "eur".to_string()]);
 
         Self {
@@ -70,8 +77,12 @@ impl Module for CurrencyModule {
         data: &str,
         commander_id: u64,
     ) -> Result<(), MyError> {
-        let Some(message) = &q.message else { return Ok(()); };
-        let Some(message) = message.regular_message() else { return Ok(()); };
+        let Some(message) = &q.message else {
+            return Ok(());
+        };
+        let Some(message) = message.regular_message() else {
+            return Ok(());
+        };
 
         let parts: Vec<_> = data.split(':').collect();
 
@@ -81,8 +92,12 @@ impl Module for CurrencyModule {
             settings.enabled = !settings.enabled;
             if settings.enabled && settings.selected_codes.is_empty() {
                 settings.selected_codes = vec![
-                    "UAH".to_string(), "RUB".to_string(), "USD".to_string(),
-                    "BYN".to_string(), "EUR".to_string(), "TON".to_string(),
+                    "UAH".to_string(),
+                    "RUB".to_string(),
+                    "USD".to_string(),
+                    "BYN".to_string(),
+                    "EUR".to_string(),
+                    "TON".to_string(),
                 ];
             }
             Settings::update_module_settings(owner, self.key(), settings).await?;
@@ -97,7 +112,9 @@ impl Module for CurrencyModule {
 
         if parts.len() >= 2 && parts[0] == "page" {
             let page = parts[1].parse::<usize>().unwrap_or(0);
-            let (text, keyboard) = self.get_paged_settings_ui(owner, page, commander_id).await?;
+            let (text, keyboard) = self
+                .get_paged_settings_ui(owner, page, commander_id)
+                .await?;
             bot.edit_message_text(message.chat.id, message.id, text)
                 .reply_markup(keyboard)
                 .parse_mode(teloxide::types::ParseMode::Html)
@@ -109,7 +126,11 @@ impl Module for CurrencyModule {
             let currency_code = parts[1].to_string();
             let mut settings: CurrencySettings =
                 Settings::get_module_settings(owner, self.key()).await?;
-            if let Some(pos) = settings.selected_codes.iter().position(|c| *c == currency_code) {
+            if let Some(pos) = settings
+                .selected_codes
+                .iter()
+                .position(|c| *c == currency_code)
+            {
                 settings.selected_codes.remove(pos);
             } else {
                 settings.selected_codes.push(currency_code);
@@ -134,7 +155,9 @@ impl Module for CurrencyModule {
         if !self.designed_for(&owner.r#type) {
             return false;
         }
-        let settings: CurrencySettings = Settings::get_module_settings(owner, self.key()).await.unwrap(); // god of unwraps
+        let settings: CurrencySettings = Settings::get_module_settings(owner, self.key())
+            .await
+            .unwrap_or_default();
         settings.enabled
     }
 
@@ -142,8 +165,12 @@ impl Module for CurrencyModule {
         let factory_settings = CurrencySettings {
             enabled: true,
             selected_codes: vec![
-                "UAH".to_string(), "RUB".to_string(), "USD".to_string(),
-                "BYN".to_string(), "EUR".to_string(), "TON".to_string(),
+                "UAH".to_string(),
+                "RUB".to_string(),
+                "USD".to_string(),
+                "BYN".to_string(),
+                "EUR".to_string(),
+                "TON".to_string(),
             ],
         };
         Ok(serde_json::to_value(factory_settings)?)
@@ -162,11 +189,19 @@ impl CurrencyModule {
             "⚙️ <b>Настройки модуля</b>: {}\n<blockquote>{}</blockquote>\nСтатус: {}\n\nВыберите валюты для отображения.",
             self.name(),
             self.description(),
-            if settings.enabled { "✅ Включен" } else { "❌ Выключен" }
+            if settings.enabled {
+                "✅ Включен"
+            } else {
+                "❌ Выключен"
+            }
         );
 
         let toggle_button = InlineKeyboardButton::callback(
-            if settings.enabled { "Выключить модуль" } else { "Включить модуль" },
+            if settings.enabled {
+                "Выключить модуль"
+            } else {
+                "Включить модуль"
+            },
             format!("{}:settings:toggle_module:{}", self.key(), commander_id),
         );
 
@@ -174,7 +209,10 @@ impl CurrencyModule {
 
         let back_button = InlineKeyboardButton::callback(
             "⬅️ Назад",
-            format!("settings_back:{}:{}:{}", owner.r#type, owner.id, commander_id),
+            format!(
+                "settings_back:{}:{}:{}",
+                owner.r#type, owner.id, commander_id
+            ),
         );
 
         let mut keyboard = Paginator::from(self.key(), &all_currencies)
@@ -183,7 +221,9 @@ impl CurrencyModule {
             .current_page(page)
             .add_bottom_row(vec![back_button])
             .set_callback_prefix(format!("{}:settings", self.key()))
-            .set_callback_formatter(move |p| format!("{}:settings:page:{}:{}", self.key(), p, commander_id))
+            .set_callback_formatter(move |p| {
+                format!("{}:settings:page:{}:{}", self.key(), p, commander_id)
+            })
             .build(|currency| {
                 let is_selected = settings.selected_codes.contains(&currency.code);
                 let icon = if is_selected { "✅" } else { "❌" };

@@ -1,6 +1,9 @@
 use crate::{
     bot::modules::{Module, ModuleSettings, Owner},
-    core::{db::schemas::settings::Settings, services::cobalt::VideoQuality},
+    core::{
+        db::schemas::settings::Settings,
+        services::cobalt::{AudioQuality, VideoQuality},
+    },
     errors::MyError,
 };
 use async_trait::async_trait;
@@ -15,13 +18,16 @@ pub struct CobaltSettings {
     pub enabled: bool,
     pub video_quality: VideoQuality,
     pub attribution: bool,
+    #[serde(default)]
+    pub audio_quality: AudioQuality,
 }
 
 impl Default for CobaltSettings {
     fn default() -> Self {
         Self {
             enabled: false,
-            video_quality: VideoQuality::Q1080,
+            video_quality: VideoQuality::Q720,
+            audio_quality: AudioQuality::K256,
             attribution: false,
         }
     }
@@ -59,11 +65,19 @@ impl Module for CobaltModule {
             "⚙️ <b>Настройки модуля</b>: {}\n<blockquote>{}</blockquote>\nСтатус: {}",
             self.name(),
             self.description(),
-            if settings.enabled { "✅ Включен" } else { "❌ Выключен" }
+            if settings.enabled {
+                "✅ Включен"
+            } else {
+                "❌ Выключен"
+            }
         );
 
         let toggle_button = InlineKeyboardButton::callback(
-            if settings.enabled { "Выключить модуль" } else { "Включить модуль" },
+            if settings.enabled {
+                "Выключить модуль"
+            } else {
+                "Включить модуль"
+            },
             format!("{}:settings:toggle_module:{}", self.key(), commander_id),
         );
 
@@ -82,7 +96,26 @@ impl Module for CobaltModule {
                     format!("{}p", q.as_str())
                 };
                 let cb_data = format!(
-                    "{}:settings:set:quality:{}:{}",
+                    "{}:settings:set:video_quality:{}:{}",
+                    self.key(),
+                    q.as_str(),
+                    commander_id
+                );
+                InlineKeyboardButton::callback(display_text, cb_data)
+            })
+            .collect::<Vec<_>>();
+
+        let audio_quality = [AudioQuality::K128, AudioQuality::K256, AudioQuality::K320];
+        let audio_options = audio_quality
+            .iter()
+            .map(|q| {
+                let display_text = if settings.audio_quality == *q {
+                    format!("• {}Kbps •", q.as_str())
+                } else {
+                    format!("{}Kbps", q.as_str())
+                };
+                let cb_data = format!(
+                    "{}:settings:set:audio_quality:{}:{}",
                     self.key(),
                     q.as_str(),
                     commander_id
@@ -107,10 +140,15 @@ impl Module for CobaltModule {
             vec![toggle_button],
             vec![InlineKeyboardButton::callback("Качество видео", "noop")],
             quality_buttons,
+            vec![InlineKeyboardButton::callback("Качество аудио", "noop")],
+            audio_options,
             vec![InlineKeyboardButton::callback(attr_text, attr_cb)],
             vec![InlineKeyboardButton::callback(
                 "⬅️ Назад",
-                format!("settings_back:{}:{}:{}", owner.r#type, owner.id, commander_id),
+                format!(
+                    "settings_back:{}:{}:{}",
+                    owner.r#type, owner.id, commander_id
+                ),
             )],
         ]);
 
@@ -125,8 +163,12 @@ impl Module for CobaltModule {
         data: &str,
         commander_id: u64,
     ) -> Result<(), MyError> {
-        let Some(message) = &q.message else { return Ok(()); };
-        let Some(message) = message.regular_message() else { return Ok(()); };
+        let Some(message) = &q.message else {
+            return Ok(());
+        };
+        let Some(message) = message.regular_message() else {
+            return Ok(());
+        };
 
         let parts: Vec<_> = data.split(':').collect();
 
@@ -152,8 +194,11 @@ impl Module for CobaltModule {
         let mut settings: CobaltSettings = Settings::get_module_settings(owner, self.key()).await?;
 
         match (parts[1], parts[2]) {
-            ("quality", val) => {
+            ("video_quality", val) => {
                 settings.video_quality = VideoQuality::parse_quality(val);
+            }
+            ("audio_quality", val) => {
+                settings.audio_quality = AudioQuality::parse_quality(val);
             }
             ("attribution", val) => {
                 settings.attribution = val.parse().unwrap_or(false);
@@ -180,14 +225,19 @@ impl Module for CobaltModule {
         if !self.designed_for(&owner.r#type) {
             return false;
         }
-        let settings: CobaltSettings = Settings::get_module_settings(owner, self.key()).await.unwrap(); // god of unwraps
+
+        let settings: CobaltSettings = Settings::get_module_settings(owner, self.key())
+            .await
+            .unwrap_or_default();
+
         settings.enabled
     }
 
     fn factory_settings(&self) -> Result<serde_json::Value, MyError> {
         let factory_settings = CobaltSettings {
             enabled: true,
-            video_quality: VideoQuality::Q1080,
+            video_quality: VideoQuality::Q720,
+            audio_quality: AudioQuality::K256,
             attribution: false,
         };
         Ok(serde_json::to_value(factory_settings)?)

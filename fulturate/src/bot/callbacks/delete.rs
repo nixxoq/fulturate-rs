@@ -120,7 +120,7 @@ pub async fn handle_delete_request(
         return Ok(());
     };
 
-    let with_confirmation = parts.get(1).map_or(true, |&flag| flag == "1");
+    let with_confirmation = parts.get(1).is_none_or(|&flag| flag == "1");
 
     let can_delete = is_admin_or_author(
         &bot,

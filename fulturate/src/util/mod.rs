@@ -6,6 +6,8 @@ pub mod currency_values;
 pub mod enums;
 pub mod paginator;
 
+pub const TELEGRAM_URL_LIMIT: u64 = 8 * 1024 * 1024;
+
 pub fn split_text(text: &str, chunk_size: usize) -> Vec<String> {
     if text.is_empty() {
         return vec![];

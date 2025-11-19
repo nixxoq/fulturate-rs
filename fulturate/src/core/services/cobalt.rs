@@ -33,15 +33,61 @@ impl VideoQuality {
     }
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub enum AudioQuality {
+    K128,
+    K256,
+    K320,
+}
+
+impl Default for AudioQuality {
+    fn default() -> AudioQuality {
+        AudioQuality::K256
+    }
+}
+
+impl AudioQuality {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            AudioQuality::K128 => "128",
+            AudioQuality::K256 => "256",
+            AudioQuality::K320 => "320",
+        }
+    }
+
+    pub fn parse_quality(s: &str) -> Self {
+        match s {
+            "128" => AudioQuality::K128,
+            "256" => AudioQuality::K256,
+            "320" => AudioQuality::K320,
+            _ => AudioQuality::K256,
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum DownloadResult {
     Video {
         url: String,
         original_url: String,
+        filename: Option<String>,
     },
     Photos {
         urls: Vec<String>,
         original_url: String,
+    },
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub enum CobaltCache {
+    Pending(DownloadResult),
+    Ready {
+        file_id: String,
+        original_url: String,
+        duration: u32,
+        width: u32,
+        height: u32,
+        thumb_file_id: String,
     },
 }
 
@@ -58,6 +104,11 @@ pub async fn resolve_download_url(
             VideoQuality::Q1080 => ccobalt::model::request::VideoQuality::Q1080,
             VideoQuality::Q1440 => ccobalt::model::request::VideoQuality::Q1440,
             VideoQuality::Max => ccobalt::model::request::VideoQuality::Max,
+        }),
+        audio_bitrate: Some(match settings.audio_quality {
+            AudioQuality::K128 => ccobalt::model::request::AudioBitrate::Kbps128,
+            AudioQuality::K256 => ccobalt::model::request::AudioBitrate::Kbps256,
+            AudioQuality::K320 => ccobalt::model::request::AudioBitrate::Kbps320,
         }),
         ..Default::default()
     };
@@ -83,6 +134,7 @@ pub async fn resolve_download_url(
                 return Ok(Some(DownloadResult::Video {
                     url: video_item.url.clone(),
                     original_url: url.to_string(),
+                    filename: None,
                 }));
             }
             Ok(None)
@@ -109,6 +161,7 @@ pub async fn resolve_download_url(
                 Ok(Some(DownloadResult::Video {
                     url: c_url,
                     original_url: url.to_string(),
+                    filename: Some(filename),
                 }))
             }
         }
@@ -117,6 +170,7 @@ pub async fn resolve_download_url(
             .map(|c_url| DownloadResult::Video {
                 url: c_url,
                 original_url: url.to_string(),
+                filename: None,
             })),
     }
 }
