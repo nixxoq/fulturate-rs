@@ -55,11 +55,10 @@ mod video_metadata {
     }
 
     #[derive(Deserialize)]
-    struct YtdlpOutput {
+    struct YtDlpOutput {
         duration: Option<f64>,
         width: Option<u32>,
         height: Option<u32>,
-        thumbnail: Option<String>,
     }
 
     pub async fn get_from_url(url: &str) -> Result<VideoMetadata, MyError> {
@@ -74,7 +73,7 @@ mod video_metadata {
             return Err("Failed to execute yt-dlp".into());
         }
 
-        let metadata: YtdlpOutput = serde_json::from_slice(&ytdlp_output.stdout)?;
+        let metadata: YtDlpOutput = serde_json::from_slice(&ytdlp_output.stdout)?;
         Ok(VideoMetadata {
             duration: metadata.duration.unwrap_or(0.0) as u32,
             width: metadata.width.unwrap_or(0),

@@ -1,9 +1,6 @@
 use crate::{
     bot::modules::{Owner, currency::CurrencySettings},
-    core::{
-        config::Config,
-        db::schemas::settings::Settings,
-    },
+    core::{config::Config, db::schemas::settings::Settings},
     errors::MyError,
 };
 use log::{debug, error};
@@ -62,7 +59,12 @@ pub async fn handle_currency_inline(
 
             let formatted_blocks: Vec<String> = results
                 .into_iter()
-                .map(|result_block| format!("<blockquote expandable>{}</blockquote>", escape(&result_block)))
+                .map(|result_block| {
+                    format!(
+                        "<blockquote expandable>{}</blockquote>",
+                        escape(&result_block)
+                    )
+                })
                 .collect();
 
             let final_message = formatted_blocks.join("\n");
@@ -74,7 +76,7 @@ pub async fn handle_currency_inline(
                     InputMessageContentText::new(final_message.clone()).parse_mode(ParseMode::Html),
                 ),
             )
-                .description(raw_results);
+            .description(raw_results);
 
             if let Err(e) = bot
                 .answer_inline_query(q.id, vec![InlineQueryResult::Article(article)])

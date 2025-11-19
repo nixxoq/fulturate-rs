@@ -33,17 +33,12 @@ impl VideoQuality {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Default, Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub enum AudioQuality {
     K128,
+    #[default]
     K256,
     K320,
-}
-
-impl Default for AudioQuality {
-    fn default() -> AudioQuality {
-        AudioQuality::K256
-    }
 }
 
 impl AudioQuality {

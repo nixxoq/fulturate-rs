@@ -35,7 +35,9 @@ pub async fn handle_currency(bot: Bot, message: Message) -> Result<(), MyError> 
     let config = Arc::new(Config::new().await);
 
     task::spawn(async move {
-        let Some(user) = message.from.clone() else { return };
+        let Some(user) = message.from.clone() else {
+            return;
+        };
         if message.forward_from_user().is_some_and(|orig| orig.is_bot)
             || user.is_bot
             || message.via_bot.is_some()
@@ -47,7 +49,12 @@ pub async fn handle_currency(bot: Bot, message: Message) -> Result<(), MyError> 
         if let Some(text) = message.text() {
             let owner = Owner {
                 id: message.chat.id.to_string(),
-                r#type: (if message.chat.is_private() { "user" } else { "group" }).to_string(),
+                r#type: (if message.chat.is_private() {
+                    "user"
+                } else {
+                    "group"
+                })
+                .to_string(),
             };
 
             match converter.process_text(text, &owner).await {
@@ -57,7 +64,10 @@ pub async fn handle_currency(bot: Bot, message: Message) -> Result<(), MyError> 
                     let formatted_blocks: Vec<String> = results
                         .into_iter()
                         .map(|result_block| {
-                            format!("<blockquote expandable>{}</blockquote>", escape(&result_block))
+                            format!(
+                                "<blockquote expandable>{}</blockquote>",
+                                escape(&result_block)
+                            )
                         })
                         .collect();
 

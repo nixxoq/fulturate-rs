@@ -1,5 +1,4 @@
-use crate::bot::inlines::math::{handle_math_inline, is_math_query};
-use crate::bot::inlines::translate::{handle_translate_inline, is_translate_query};
+// use crate::bot::inlines::math::{handle_math_inline, is_math_query};
 use crate::{
     bot::{
         callbacks::callback_query_handlers,
@@ -8,8 +7,9 @@ use crate::{
             cobalter::{handle_cobalt_inline, handle_inline_video, is_query_url},
             currency::{handle_currency_inline, is_currency_query},
             whisper::{handle_whisper_inline, is_whisper_query},
+            translate::{handle_translate_inline, is_translate_query}
         },
-        keyboards::delete::{delete_message_button, delete_message_button_no_confirm},
+        keyboards::delete::delete_message_button_no_confirm,
         messager::{handle_currency, handle_speech},
         messages::chat::handle_bot_added,
         modules::{Owner, registry::MOD_MANAGER},
