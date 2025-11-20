@@ -11,6 +11,7 @@ use crate::{
         },
     },
     errors::MyError,
+    util::MAX_DURATION_SECONDS,
 };
 use ccobalt::model::request::{DownloadRequest, FilenameStyle};
 use once_cell::sync::Lazy;
@@ -52,6 +53,7 @@ mod video_metadata {
         pub duration: u32,
         pub width: u32,
         pub height: u32,
+        pub thumbnail_url: Option<String>,
     }
 
     #[derive(Deserialize)]
@@ -59,6 +61,7 @@ mod video_metadata {
         duration: Option<f64>,
         width: Option<u32>,
         height: Option<u32>,
+        thumbnail: Option<String>,
     }
 
     pub async fn get_from_url(url: &str) -> Result<VideoMetadata, MyError> {
@@ -78,7 +81,7 @@ mod video_metadata {
             duration: metadata.duration.unwrap_or(0.0) as u32,
             width: metadata.width.unwrap_or(0),
             height: metadata.height.unwrap_or(0),
-            // thumbnail: metadata.thumbnail.unwrap_or_default(),
+            thumbnail_url: metadata.thumbnail,
         })
     }
 
@@ -89,7 +92,21 @@ mod video_metadata {
     ) -> Result<(PathBuf, TempGuard), MyError> {
         let thumb_path = output_dir.join(format!("{}_thumb.jpg", file_hash));
         let response = reqwest::get(url).await?.bytes().await?;
-        tokio::fs::write(&thumb_path, &response).await?;
+
+        let path_clone = thumb_path.clone();
+        tokio::task::spawn_blocking(move || -> Result<(), MyError> {
+            let img = image::load_from_memory(&response)
+                .map_err(|e| format!("Failed to load image: {}", e))?;
+            let scaled = img.resize(320, 320, image::imageops::FilterType::Lanczos3);
+
+            scaled
+                .save_with_format(&path_clone, image::ImageFormat::Jpeg)
+                .map_err(|e| format!("Failed to save image: {}", e))?;
+
+            Ok(())
+        })
+        .await??;
+
         let guard = TempGuard {
             path: thumb_path.clone(),
         };
@@ -197,7 +214,6 @@ pub async fn handle_cobalt_inline(
         };
         build_results_from_media(&original_url_str, download_result, &url_hash, user_id)
     } else {
-        const MAX_DURATION_SECONDS: u32 = 10 * 60; // todo: move this value to other place
         match video_metadata::get_from_url(url).await {
             Ok(meta) if meta.duration > MAX_DURATION_SECONDS => {
                 let minutes = MAX_DURATION_SECONDS / 60;
@@ -256,14 +272,15 @@ pub async fn handle_inline_video(
     let cache_key = format!("cobalt_cache:{}", url_hash);
     let cached_data = redis.get::<CobaltCache>(&cache_key).await?;
 
-    let (file_id, original_url) = match cached_data {
+    let (file_id, original_url, thumb_file_id) = match cached_data {
         Some(CobaltCache::Ready {
             file_id,
             original_url,
+            thumb_file_id,
             ..
-        }) => (file_id, original_url),
+        }) => (file_id, original_url, thumb_file_id),
         Some(CobaltCache::Pending(DownloadResult::Video {
-            url: video_url,
+            url: _video_url,
             original_url,
             ..
         })) => {
@@ -271,22 +288,18 @@ pub async fn handle_inline_video(
             fs::create_dir_all(&temp_dir).await?;
 
             let meta = video_metadata::get_from_url(&original_url).await?;
-            let (thumb_path, _thumb_guard) =
-                video_metadata::download_thumbnail(&video_url, &temp_dir, url_hash).await?;
-
-            let log_channel_id = ChatId(config.get_log_chat_id().parse().unwrap());
-            let thumb_msg = bot
-                .send_photo(log_channel_id, InputFile::file(thumb_path))
-                .await?;
-            let thumb_file_id = thumb_msg
-                .photo()
-                .and_then(|p| p.last())
-                .map(|s| s.file.id.clone())
-                .ok_or("Failed to get thumb file_id")?;
-            bot.delete_message(log_channel_id, thumb_msg.id).await.ok();
+            let thumb_data = if let Some(thumb_url) = &meta.thumbnail_url {
+                video_metadata::download_thumbnail(thumb_url, &temp_dir, url_hash)
+                    .await
+                    .ok()
+            } else {
+                None
+            };
 
             bot.edit_message_text_inline(&inline_message_id, "⏳ Загружаю видео...")
                 .await?;
+
+            let log_channel_id = ChatId(config.get_log_chat_id().parse().unwrap());
 
             let owner = Owner {
                 id: chosen.from.id.to_string(),
@@ -319,18 +332,28 @@ pub async fn handle_inline_video(
                 path: video_path.clone(),
             };
 
-            let video_msg = bot
+            let mut video_msg = bot
                 .send_video(log_channel_id, InputFile::file(&video_path))
                 .duration(meta.duration)
                 .width(meta.width)
-                .height(meta.height)
-                .thumbnail(InputFile::file_id(thumb_file_id.clone()))
-                .await?;
+                .height(meta.height);
+
+            if let Some((path, _guard)) = &thumb_data {
+                video_msg = video_msg.thumbnail(InputFile::file(path));
+            }
+
+            let video_msg = video_msg.await?;
 
             let video = video_msg
                 .video()
                 .ok_or("Failed to get video from message")?;
             let file_id = video.file.id.clone();
+
+            let thumb_id = video
+                .thumbnail
+                .as_ref()
+                .map(|p| p.file.id.clone())
+                .unwrap_or_default();
 
             let ready_cache = CobaltCache::Ready {
                 file_id: file_id.to_string(),
@@ -338,13 +361,23 @@ pub async fn handle_inline_video(
                 duration: meta.duration,
                 width: meta.width,
                 height: meta.height,
-                thumb_file_id: thumb_file_id.to_string(),
+                thumb_file_id: thumb_id.to_string(),
             };
             redis
                 .set(&cache_key, &ready_cache, 365 * 24 * 60 * 60)
                 .await?;
 
-            (file_id.to_string(), original_url)
+            let ret_thumb = if thumb_id.0.is_empty() {
+                None
+            } else {
+                Some(thumb_id)
+            };
+
+            (
+                file_id.to_string(),
+                original_url,
+                ret_thumb.unwrap_or_default().to_string(),
+            )
         }
         _ => {
             bot.edit_message_text_inline(inline_message_id, "❌ Ошибка: видео не найдено в кэше.")
@@ -353,13 +386,16 @@ pub async fn handle_inline_video(
         }
     };
 
-    let media = InputMedia::Video(InputMediaVideo::new(InputFile::file_id(FileId::from(
-        file_id,
-    ))));
+    let mut media = InputMediaVideo::new(InputFile::file_id(FileId::from(file_id)));
+
+    if !thumb_file_id.is_empty() {
+        media = media.thumbnail(InputFile::file_id(FileId::from(thumb_file_id)));
+    }
+
     let url_kb = make_single_url_keyboard(&original_url);
 
     if let Err(e) = bot
-        .edit_message_media_inline(&inline_message_id, media)
+        .edit_message_media_inline(&inline_message_id, InputMedia::Video(media))
         .reply_markup(url_kb)
         .await
     {

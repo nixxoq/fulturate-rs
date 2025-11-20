@@ -70,6 +70,9 @@ pub enum MyError {
 
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
+
+    #[error("Async Task Join Error: {0}")]
+    JoinError(#[from] tokio::task::JoinError),
 }
 
 impl From<&str> for MyError {
