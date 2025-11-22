@@ -6,6 +6,7 @@ pub struct JsonConfig {
     pub ai_model: String,
     pub ai_prompt: String,
     pub summarize_prompt: String,
+    pub retell_prompt: String,
 }
 
 impl JsonConfig {
@@ -19,6 +20,10 @@ impl JsonConfig {
 
     pub fn get_summarize_prompt(&self) -> &str {
         &self.summarize_prompt
+    }
+
+    pub fn get_retell_prompt(&self) -> &str {
+        &self.retell_prompt
     }
 }
 

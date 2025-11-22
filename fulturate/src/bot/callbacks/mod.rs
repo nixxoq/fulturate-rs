@@ -57,6 +57,7 @@ enum CallbackAction<'a> {
     DeleteMessage,
     DeleteMessageConfirmation,
     Summarize,
+    Retell,
     RetrySpeech {
         message_id: i32,
         action_type: &'a str,
@@ -143,6 +144,9 @@ fn parse_callback_data(data: &'_ str) -> Option<CallbackAction<'_>> {
     }
     if data == "summarize" {
         return Some(CallbackAction::Summarize);
+    }
+    if data == "retell" {
+        return Some(CallbackAction::Retell);
     }
     if let Some(rest) = data.strip_prefix("retry_speech:") {
         let parts: Vec<_> = rest.splitn(3, ':').collect();
@@ -295,6 +299,7 @@ pub async fn callback_query_handlers(bot: Bot, q: CallbackQuery) -> Result<(), M
             handle_delete_confirmation(bot, q, &config).await?
         }
         Some(CallbackAction::Summarize) => summarization_handler(bot, q, &config).await?,
+        Some(CallbackAction::Retell) => summarization_handler(bot, q, &config).await?,
         Some(CallbackAction::RetrySpeech {
             message_id,
             action_type,
