@@ -58,7 +58,7 @@ services:
     restart: unless-stopped
     depends_on:
       - redis
-#      - api
+      #      - api
       - mongo
       - telegram_api
     networks:
@@ -75,6 +75,8 @@ services:
       - ERROR_CHAT_THREAD_ID=-1002822733415
       - ARCHIVE_CHAT_ID=-4919496528
       - TELEGRAM_API_URL=http://telegram_api:8081
+    volumes:
+      - telegram_bot_api_data:/var/lib/telegram-bot-api
 #    env_file:
 #      - ./fulturate/.env
 
