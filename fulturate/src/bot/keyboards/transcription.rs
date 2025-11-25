@@ -2,6 +2,7 @@ use crate::util::paginator::{FrameBuild, Paginator};
 use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup};
 
 pub const TRANSCRIPTION_MODULE_KEY: &str = "speech";
+pub const SUMMARY_MODULE_KEY: &str = "summary";
 
 pub fn create_transcription_keyboard(
     current_page: usize,
@@ -27,9 +28,25 @@ pub fn create_summary_keyboard() -> InlineKeyboardMarkup {
     )]])
 }
 
-pub fn create_retry_keyboard(message_id: i32, action_type: &str, attempt: u32) -> InlineKeyboardMarkup {
+pub fn create_summary_pagination_keyboard(
+    current_page: usize,
+    total_pages: usize,
+) -> InlineKeyboardMarkup {
+    let back_button = InlineKeyboardButton::callback("⬅️ Назад", "back_to_full");
+
+    Paginator::new(SUMMARY_MODULE_KEY, total_pages)
+        .current_page(current_page)
+        .add_bottom_row(vec![back_button])
+        .build()
+}
+
+pub fn create_retry_keyboard(
+    message_id: i32,
+    action_type: &str,
+    attempt: u32,
+) -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(vec![vec![InlineKeyboardButton::callback(
         "🔁 Повторить попытку",
         format!("retry_speech:{}:{}:{}", message_id, action_type, attempt),
-    )]/*, delete_message_button(user_id).inline_keyboard.first().unwrap().to_vec()*/])
+    )]])
 }
