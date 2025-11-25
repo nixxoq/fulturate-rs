@@ -25,6 +25,7 @@ pub struct Config {
     currency_converter: Arc<CurrencyConverter>,
     mongodb_url: String,
     redis_client: RedisCache,
+    telegram_api: String,
 }
 
 impl Config {
@@ -121,6 +122,7 @@ impl Config {
             currency_converter,
             mongodb_url,
             redis_client,
+            telegram_api: telegram_api_url,
         }
     }
 
@@ -167,5 +169,9 @@ impl Config {
 
     pub fn get_redis_client(&self) -> &RedisCache {
         &self.redis_client
+    }
+
+    pub fn get_telegram_api(&self) -> &str {
+        &self.telegram_api
     }
 }

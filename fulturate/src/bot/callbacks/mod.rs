@@ -1,4 +1,3 @@
-use crate::core::services::speech_recognition::retry_speech_handler;
 use crate::{
     bot::{
         callbacks::{
@@ -15,7 +14,9 @@ use crate::{
     },
     core::{
         config::Config,
-        services::speech_recognition::{back_handler, pagination_handler, summarization_handler},
+        services::speech_recognition::{
+            back_handler, pagination_handler, retry_speech_handler, summarization_handler,
+        },
     },
     errors::MyError,
 };
@@ -63,7 +64,7 @@ enum CallbackAction<'a> {
         action_type: &'a str,
         attempt: u32,
     },
-    SpeechPage,
+    TranscriptionPagination,
     BackToFull,
     Whisper,
     Translate,
@@ -161,8 +162,8 @@ fn parse_callback_data(data: &'_ str) -> Option<CallbackAction<'_>> {
             });
         }
     }
-    if data.starts_with("speech:page:") {
-        return Some(CallbackAction::SpeechPage);
+    if data.starts_with("speech:page:") || data.starts_with("summary:page:") {
+        return Some(CallbackAction::TranscriptionPagination);
     }
     if data.starts_with("back_to_full") {
         return Some(CallbackAction::BackToFull);
@@ -307,7 +308,9 @@ pub async fn callback_query_handlers(bot: Bot, q: CallbackQuery) -> Result<(), M
         }) => {
             retry_speech_handler(bot, q.clone(), &config, message_id, action_type, attempt).await?
         }
-        Some(CallbackAction::SpeechPage) => pagination_handler(bot, q, &config).await?,
+        Some(CallbackAction::TranscriptionPagination) => {
+            pagination_handler(bot, q, &config).await?
+        }
         Some(CallbackAction::BackToFull) => back_handler(bot, q, &config).await?,
         Some(CallbackAction::Whisper) => handle_whisper_callback(bot, q, &config).await?,
         Some(CallbackAction::Translate) => handle_translate_callback(bot, q, &config).await?,
