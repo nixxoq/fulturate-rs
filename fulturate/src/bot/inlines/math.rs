@@ -1,8 +1,11 @@
-use crate::bot::modules::math::MathSettings;
-use crate::core::config::Config;
-use crate::{bot::modules::Owner, core::db::schemas::settings::Settings, errors::MyError};
-use eidolon_lang::interpreter::value::EidolonValue;
+// use crate::bot::modules::math::MathModule;
+use crate::{
+    bot::modules::{Owner, math::MathSettings},
+    core::{config::Config, db::schemas::settings::Settings},
+    errors::MyError,
+};
 use eidolon_lang::interpreter::evaluate;
+use eidolon_lang::interpreter::value::EidolonValue;
 use image::{ImageBuffer, ImageFormat, Rgb};
 use plotters::backend::BitMapBackend;
 use plotters::chart::ChartBuilder;
@@ -17,8 +20,8 @@ use teloxide::{
     payloads::AnswerInlineQuerySetters,
     prelude::*,
     types::{
-        InlineQuery, InlineQueryResult, InlineQueryResultArticle,
-        InputMessageContent, InputMessageContentText,
+        InlineQuery, InlineQueryResult, InlineQueryResultArticle, InputMessageContent,
+        InputMessageContentText,
     },
 };
 
@@ -31,11 +34,16 @@ fn generate_plot(expression: &str) -> Result<Vec<u8>, MyError> {
         eidolon_lang::parse_eidolon_source(expression).map_err(|e| MyError::Other(e.message))?;
 
     {
-        let root = BitMapBackend::with_buffer(&mut pixel_buffer, (width, height)).into_drawing_area();
-        root.fill(&WHITE).map_err(|e| MyError::Plotting(e.to_string()))?;
+        let root =
+            BitMapBackend::with_buffer(&mut pixel_buffer, (width, height)).into_drawing_area();
+        root.fill(&WHITE)
+            .map_err(|e| MyError::Plotting(e.to_string()))?;
 
         let mut chart = ChartBuilder::on(&root)
-            .caption(format!("y = {}", expression), <(&str, _)>::into_font(("sans-serif", 40)))
+            .caption(
+                format!("y = {}", expression),
+                <(&str, _)>::into_font(("sans-serif", 40)),
+            )
             .margin(10)
             .x_label_area_size(40)
             .y_label_area_size(40)
@@ -62,13 +70,15 @@ fn generate_plot(expression: &str) -> Result<Vec<u8>, MyError> {
             ))
             .map_err(|e| MyError::Plotting(e.to_string()))?;
 
-        root.present().map_err(|e| MyError::Plotting(e.to_string()))?;
+        root.present()
+            .map_err(|e| MyError::Plotting(e.to_string()))?;
     }
 
     let mut png_buffer: Vec<u8> = Vec::new();
     let image_buffer: ImageBuffer<Rgb<u8>, Vec<u8>> =
-        ImageBuffer::from_raw(width, height, pixel_buffer)
-            .ok_or_else(|| MyError::Plotting("Failed to create image buffer from raw pixels".to_string()))?;
+        ImageBuffer::from_raw(width, height, pixel_buffer).ok_or_else(|| {
+            MyError::Plotting("Failed to create image buffer from raw pixels".to_string())
+        })?;
 
     image_buffer
         .write_to(&mut Cursor::new(&mut png_buffer), ImageFormat::Png)
@@ -77,7 +87,11 @@ fn generate_plot(expression: &str) -> Result<Vec<u8>, MyError> {
     Ok(png_buffer)
 }
 
-pub async fn handle_math_inline(bot: Bot, q: InlineQuery, config: Arc<Config>) -> Result<(), MyError> {
+pub async fn handle_math_inline(
+    bot: Bot,
+    q: InlineQuery,
+    config: Arc<Config>,
+) -> Result<(), MyError> {
     let expression = q.query.trim();
 
     if expression.is_empty() {
@@ -106,31 +120,28 @@ pub async fn handle_math_inline(bot: Bot, q: InlineQuery, config: Arc<Config>) -
 
                 println!("{}, {:?}", archive_chat_id, photo_file);
 
-                let message = bot
-                    .send_photo(ChatId(archive_chat_id), photo_file)
-                    .await?;
+                let message = bot.send_photo(ChatId(archive_chat_id), photo_file).await?;
 
                 let file_id = message
                     .photo()
                     .and_then(|photos| photos.last().map(|p| p.file.id.clone()))
                     .unwrap();
 
-                let photo_result = InlineQueryResultCachedPhoto::new(
-                    "plot_result",
-                    file_id
-                )
+                let photo_result = InlineQueryResultCachedPhoto::new("plot_result", file_id)
                     .title(format!("График для y = {}", expression))
                     .description("Нажмите, чтобы отправить график в чат.");
                 result = InlineQueryResult::CachedPhoto(photo_result);
-                bot.delete_message(message.chat_id().unwrap(), message.id).await?;
+                bot.delete_message(message.chat_id().unwrap(), message.id)
+                    .await?;
             }
             Err(e) => {
                 result = InlineQueryResult::Article(InlineQueryResultArticle::new(
                     "plot_error",
                     format!("Ошибка построения: {}", e),
-                    InputMessageContent::Text(InputMessageContentText::new(
-                        format!("Произошла ошибка при построении графика: {}", e)
-                    ))
+                    InputMessageContent::Text(InputMessageContentText::new(format!(
+                        "Произошла ошибка при построении графика: {}",
+                        e
+                    ))),
                 ));
             }
         }
