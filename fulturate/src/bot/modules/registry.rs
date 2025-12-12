@@ -1,10 +1,9 @@
-use super::{Module, cobalt::CobaltModule};
-use crate::bot::modules::currency::CurrencyModule;
+use super::{
+    Module, cobalt::CobaltModule, currency::CurrencyModule, math::MathModule,
+    translate::TranslateModule, whisper::WhisperModule,
+};
 use once_cell::sync::Lazy;
 use std::{collections::BTreeMap, sync::Arc};
-use crate::bot::modules::math::MathModule;
-use crate::bot::modules::translate::TranslateModule;
-use crate::bot::modules::whisper::WhisperModule;
 
 pub struct ModuleManager {
     modules: BTreeMap<String, Arc<dyn Module>>,
@@ -12,10 +11,19 @@ pub struct ModuleManager {
 
 impl ModuleManager {
     fn new() -> Self {
-        let modules: Vec<Arc<dyn Module>> = vec![
-            Arc::new(CobaltModule), Arc::new(CurrencyModule),
-            Arc::new(WhisperModule), Arc::new(TranslateModule),
-            Arc::new(MathModule)];
+        macro_rules! register {
+            ($($module:expr),* $(,)?) => {
+                vec![ $( Arc::new($module) as Arc<dyn Module> ),* ]
+            };
+        }
+
+        let modules = register![
+            CobaltModule,
+            CurrencyModule,
+            WhisperModule,
+            TranslateModule,
+            MathModule
+        ];
 
         let modules = modules
             .into_iter()
@@ -34,7 +42,10 @@ impl ModuleManager {
     }
 
     pub fn get_designed_modules(&self, owner_type: &str) -> Vec<&Arc<dyn Module>> {
-        self.modules.values().filter(|module| module.designed_for(owner_type)).collect()
+        self.modules
+            .values()
+            .filter(|module| module.designed_for(owner_type))
+            .collect()
     }
 }
 
