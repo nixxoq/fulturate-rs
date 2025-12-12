@@ -9,61 +9,67 @@ use crate::{
     errors::MyError,
 };
 use log::error;
-use oximod::Model;
 use std::collections::HashSet;
 use teloxide::{
     prelude::*,
     types::{ParseMode, ReplyParameters},
 };
 
-pub async fn handle_currency_update<T: BaseFunctions + CurrenciesFunctions + Model>(
-    bot: Bot,
-    msg: Message,
-    code: String,
-) -> Result<(), MyError> {
+pub async fn handle_currency_update<T>(bot: Bot, msg: Message, code: String) -> Result<(), MyError>
+where
+    T: BaseFunctions + CurrenciesFunctions + Send + Sync,
+{
     let code = code.to_uppercase();
 
     let all_codes = get_all_currency_codes(CURRENCY_CONFIG_PATH.parse().unwrap())?;
-    if !all_codes.iter().any(|c| c.code == code) {
-        let message = format!("Currency code <code>{}</code> does not exist.", code);
-        bot.send_message(msg.chat.id, message)
-            .parse_mode(ParseMode::Html)
-            .reply_parameters(ReplyParameters::new(msg.id))
-            .await?;
+    let currency = all_codes.iter().find(|c| c.code == code);
+
+    if currency.is_none() {
+        bot.send_message(
+            msg.chat.id,
+            format!("Currency code <code>{}</code> does not exist.", code),
+        )
+        .parse_mode(ParseMode::Html)
+        .reply_parameters(ReplyParameters::new(msg.id))
+        .await?;
         return Ok(());
     }
 
-    let entity_id = msg.chat.id.to_string();
-    let entity = match get_or_create::<T>(entity_id).await {
+    let entity = match get_or_create::<T>(msg.chat.id.to_string()).await {
         Ok(e) => e,
         Err(e) => {
-            error!("Failed to get or create entity: {:?}", e);
-            let message = "Error: Could not access settings. Try again".to_string();
-            bot.send_message(msg.chat.id, message)
-                .reply_parameters(ReplyParameters::new(msg.id))
-                .await?;
+            error!(
+                "Failed to get or create entity in chat {}: {:?}",
+                msg.chat.id, e
+            );
+            bot.send_message(
+                msg.chat.id,
+                "Error: Could not access settings. Try again later.",
+            )
+            .reply_parameters(ReplyParameters::new(msg.id))
+            .await?;
             return Ok(());
         }
     };
 
     let is_enabled = entity.get_currencies().iter().any(|c| c.code == code);
+    let key = entity.get_key();
 
-    let (update_func, action_text) = if is_enabled {
-        (T::remove_currency(entity.get_id(), &code), "removed")
+    let result = if is_enabled {
+        T::remove_currency(key, &code).await.map(|_| "removed")
     } else {
-        let currency_to_add = all_codes.iter().find(|x| x.code == code).unwrap();
-        (T::add_currency(entity.get_id(), currency_to_add), "added")
+        T::add_currency(key, currency.unwrap())
+            .await
+            .map(|_| "added")
     };
 
-    let message = match update_func.await {
-        Ok(_) => {
-            format!(
-                "Successfully {} <code>{}</code> from currency conversion.",
-                action_text, code
-            )
-        }
+    let message = match result {
+        Ok(action) => format!(
+            "Successfully {} <code>{}</code> from currency conversion.",
+            action, code
+        ),
         Err(e) => {
-            error!("--- Update failed: {:?} ---", e);
+            error!("Failed to update currency for {}: {:?}", msg.chat.id, e);
             "Failed to apply changes.".to_string()
         }
     };
@@ -78,21 +84,22 @@ pub async fn handle_currency_update<T: BaseFunctions + CurrenciesFunctions + Mod
 
 pub async fn get_enabled_codes(msg: &Message) -> HashSet<String> {
     let chat_id = msg.chat.id.to_string();
-    if msg.chat.is_private() {
-        if let Ok(Some(user)) = <User as BaseFunctions>::find_by_id(chat_id).await {
-            return user
+
+    async fn fetch<T: BaseFunctions + CurrenciesFunctions>(id: String) -> HashSet<String> {
+        if let Ok(Some(entity)) = T::get(id).await {
+            entity
                 .get_currencies()
                 .iter()
                 .map(|c| c.code.clone())
-                .collect();
+                .collect()
+        } else {
+            HashSet::new()
         }
-    } else if let Ok(Some(group)) = <Group as BaseFunctions>::find_by_id(chat_id).await {
-        return group
-            .get_currencies()
-            .iter()
-            .map(|c| c.code.clone())
-            .collect();
     }
 
-    HashSet::new()
+    if msg.chat.is_private() {
+        fetch::<User>(chat_id).await
+    } else {
+        fetch::<Group>(chat_id).await
+    }
 }
