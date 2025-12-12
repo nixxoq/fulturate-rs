@@ -1,6 +1,7 @@
 use crate::{
     bot::modules::{ModuleSettings, Owner},
     errors::MyError,
+    impl_skeleton,
 };
 use mongodb::{
     bson,
@@ -27,6 +28,8 @@ pub struct Settings {
     #[serde(default)]
     pub modules: BTreeMap<String, Value>,
 }
+
+impl_skeleton!(Settings);
 
 impl Settings {
     pub async fn create_with_defaults(owner: &Owner) -> Result<Self, MyError> {
@@ -99,20 +102,14 @@ impl Settings {
     }
 
     pub(crate) async fn get_or_create(owner: &Owner) -> Result<Self, MyError> {
-        if let Some(found) =
-            Settings::find_one(doc! { "owner_id": &owner.id, "owner_type": &owner.r#type }).await?
-        {
-            Ok(found)
-        } else {
-            let new_doc = Self::create_with_defaults(owner).await?;
-            Ok(new_doc)
-            // let new_doc = Settings::new()
-            //     .owner_id(owner.id.clone())
-            //     .owner_type(owner.r#type.clone())
-            //     .modules(BTreeMap::new());
-            //
-            // new_doc.save().await?;
-            // Ok(new_doc)
+        let query = Self::query()
+            .filter("owner_id", &owner.id)
+            .filter("owner_type", &owner.r#type);
+
+        if let Some(doc) = query.first().await? {
+            return Ok(doc);
         }
+
+        Self::create_with_defaults(owner).await
     }
 }
