@@ -62,6 +62,7 @@ module! {
                 &s.video_quality,
                 &vid_opts,
                 &format!("{}:settings:set:video", self.key()),
+                cid,
                 |v| v.as_str().to_string()
             );
 
@@ -69,6 +70,7 @@ module! {
                 &s.audio_quality,
                 &aud_opts,
                 &format!("{}:settings:set:audio", self.key()),
+                cid,
                 |a| a.as_str().to_string()
             );
 
