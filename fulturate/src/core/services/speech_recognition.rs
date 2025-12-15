@@ -1,9 +1,12 @@
 use crate::{
-    bot::keyboards::transcription::{
-        create_retry_keyboard, create_summary_keyboard, create_summary_pagination_keyboard,
-        create_transcription_keyboard,
+    bot::{
+        keyboards::transcription::{
+            create_retry_keyboard, create_summary_keyboard, create_summary_pagination_keyboard,
+            create_transcription_keyboard,
+        },
+        modules::{Owner, speech_recognition::SpeechRecognitionSettings},
     },
-    core::config::Config,
+    core::{config::Config, db::schemas::settings::Settings as DbSettings},
     errors::MyError,
     util::{enums::AudioStruct, split_text},
 };
@@ -36,6 +39,7 @@ pub struct Transcription {
     pub(crate) mime_type: String,
     pub(crate) data: Bytes,
     pub(crate) config: Config,
+    pub(crate) custom_model: String,
 }
 
 pub async fn pagination_handler(
@@ -182,6 +186,18 @@ pub async fn summarization_handler(
         return Ok(());
     };
 
+    let owner = Owner {
+        id: message.chat.id.to_string(),
+        r#type: if message.chat.is_private() {
+            "user".to_string()
+        } else {
+            "group".to_string()
+        },
+    };
+    let settings: SpeechRecognitionSettings = DbSettings::get_module_settings(&owner, "speech")
+        .await
+        .unwrap_or_default();
+
     let action_type = query.data.as_deref().unwrap_or("summarize");
 
     let Some(audio_message_id) = message.reply_to_message().map(|m| m.id.0) else {
@@ -260,6 +276,7 @@ pub async fn summarization_handler(
         .await?;
 
     let file_data_result = save_file_to_memory(&bot, &cache_entry.file_id, config).await;
+
     let new_summary_result = match file_data_result {
         Ok(file_data) => {
             summarize_audio(
@@ -267,6 +284,7 @@ pub async fn summarization_handler(
                 file_data,
                 config.clone(),
                 action_type,
+                settings.summary_model.api_key().to_string(),
             )
             .await
         }
@@ -321,6 +339,7 @@ async fn get_cached(
     file: &AudioStruct,
     config: &Config,
     force_no_cache: bool,
+    model: String,
 ) -> Result<TranscriptionCache, MyError> {
     let cache = config.get_redis_client();
     let file_cache_key = format!("transcription_by_file:{}", &file.file_unique_id);
@@ -338,6 +357,7 @@ async fn get_cached(
         mime_type: file.mime_type.to_string(),
         data: file_data,
         config: config.clone(),
+        custom_model: model,
     };
     let processed_parts = transcription.to_text().await;
 
@@ -370,6 +390,37 @@ pub async fn transcription_handler(
     msg: &Message,
     config: &Config,
 ) -> Result<(), MyError> {
+    let owner = Owner {
+        id: msg.chat.id.to_string(),
+        r#type: if msg.chat.is_private() {
+            "user".to_string()
+        } else {
+            "group".to_string()
+        },
+    };
+
+    let settings: SpeechRecognitionSettings = DbSettings::get_module_settings(&owner, "speech")
+        .await
+        .unwrap_or_default();
+
+    if !settings.enabled {
+        return Ok(());
+    }
+
+    let is_allowed = if msg.voice().is_some() {
+        settings.enable_voice
+    } else if msg.video_note().is_some() {
+        settings.enable_video_note
+    } else if msg.audio().is_some() {
+        settings.enable_audio
+    } else {
+        false
+    };
+
+    if !is_allowed {
+        return Ok(());
+    }
+
     let message = bot
         .send_message(msg.chat.id, "Обрабатываю аудио...")
         .reply_parameters(ReplyParameters::new(msg.id))
@@ -380,14 +431,7 @@ pub async fn transcription_handler(
     let Some(message) = message else {
         return Ok(());
     };
-
     let Some(user) = msg.from.as_ref() else {
-        bot.edit_message_text(
-            message.chat.id,
-            message.id,
-            "❌ Не удалось определить пользователя.",
-        )
-        .await?;
         return Ok(());
     };
 
@@ -409,12 +453,12 @@ pub async fn transcription_handler(
         };
         cache.set(&file_cache_key, &empty_cache, 86400).await?;
 
-        match get_cached(&bot, &file, config, false).await {
+        let model_key = settings.transcription_model.api_key().to_string();
+
+        match get_cached(&bot, &file, config, false, model_key).await {
             Ok(cache_entry) => {
                 let text_parts = split_text(&cache_entry.full_text, 4000);
                 if text_parts.is_empty() {
-                    bot.edit_message_text(message.chat.id, message.id, "❌ Получен пустой текст.")
-                        .await?;
                     return Ok(());
                 }
 
@@ -433,36 +477,117 @@ pub async fn transcription_handler(
             }
             Err(e) => {
                 error!("Failed to get transcription: {:?}", e);
-                let error_text = match e {
-                    MyError::Other(msg) if msg.contains("❌ Не удалось преобразовать") => {
-                        msg
-                    }
-                    MyError::Reqwest(_) => {
-                        "❌ Ошибка: Не удалось скачать файл. Возможно, он слишком большой (>20MB)."
-                            .to_string()
-                    }
-                    _ => "❌ Произошла неизвестная ошибка при обработке аудио.".to_string(),
-                };
-
-                let original_message_id = msg.id.0;
-                let retry_keyboard = create_retry_keyboard(original_message_id, "transcribe", 0);
-
+                let error_text = "❌ Произошла ошибка при обработке аудио.".to_string();
+                let retry_keyboard = create_retry_keyboard(msg.id.0, "transcribe", 0);
                 bot.edit_message_text(message.chat.id, message.id, error_text)
                     .reply_markup(retry_keyboard)
                     .await?;
             }
         }
     } else {
-        bot.edit_message_text(
-            message.chat.id,
-            message.id,
-            "❌ Не удалось найти голосовое сообщение.",
-        )
-        .parse_mode(ParseMode::Html)
-        .await?;
+        bot.edit_message_text(message.chat.id, message.id, "❌ Не удалось найти аудио.")
+            .await?;
     }
     Ok(())
 }
+// pub async fn transcription_handler(
+//     bot: Bot,
+//     msg: &Message,
+//     config: &Config,
+// ) -> Result<(), MyError> {
+//     let message = bot
+//         .send_message(msg.chat.id, "Обрабатываю аудио...")
+//         .reply_parameters(ReplyParameters::new(msg.id))
+//         .parse_mode(ParseMode::Html)
+//         .await
+//         .ok();
+//
+//     let Some(message) = message else {
+//         return Ok(());
+//     };
+//
+//     let Some(user) = msg.from.as_ref() else {
+//         bot.edit_message_text(
+//             message.chat.id,
+//             message.id,
+//             "❌ Не удалось определить пользователя.",
+//         )
+//         .await?;
+//         return Ok(());
+//     };
+//
+//     if let Some(file) = get_file_id(msg).await {
+//         let cache = config.get_redis_client();
+//         let message_file_map_key = format!("message_file_map:{}", message.id);
+//
+//         cache
+//             .set(&message_file_map_key, &file.file_unique_id, 86400)
+//             .await?;
+//
+//         let file_cache_key = format!("transcription_by_file:{}", &file.file_unique_id);
+//         let empty_cache = TranscriptionCache {
+//             full_text: String::new(),
+//             summary: None,
+//             file_id: file.file_id.clone(),
+//             mime_type: file.mime_type.clone(),
+//             attempt: 0,
+//         };
+//         cache.set(&file_cache_key, &empty_cache, 86400).await?;
+//
+//         match get_cached(&bot, &file, config, false).await {
+//             Ok(cache_entry) => {
+//                 let text_parts = split_text(&cache_entry.full_text, 4000);
+//                 if text_parts.is_empty() {
+//                     bot.edit_message_text(message.chat.id, message.id, "❌ Получен пустой текст.")
+//                         .await?;
+//                     return Ok(());
+//                 }
+//
+//                 let keyboard = create_transcription_keyboard(0, text_parts.len(), user.id.0);
+//                 bot.edit_message_text(
+//                     msg.chat.id,
+//                     message.id,
+//                     format!(
+//                         "<blockquote expandable>{}</blockquote>",
+//                         html::escape(&text_parts[0])
+//                     ),
+//                 )
+//                 .parse_mode(ParseMode::Html)
+//                 .reply_markup(keyboard)
+//                 .await?;
+//             }
+//             Err(e) => {
+//                 error!("Failed to get transcription: {:?}", e);
+//                 let error_text = match e {
+//                     MyError::Other(msg) if msg.contains("❌ Не удалось преобразовать") => {
+//                         msg
+//                     }
+//                     MyError::Reqwest(_) => {
+//                         "❌ Ошибка: Не удалось скачать файл. Возможно, он слишком большой (>20MB)."
+//                             .to_string()
+//                     }
+//                     _ => "❌ Произошла неизвестная ошибка при обработке аудио.".to_string(),
+//                 };
+//
+//                 let original_message_id = msg.id.0;
+//                 let retry_keyboard = create_retry_keyboard(original_message_id, "transcribe", 0);
+//
+//                 bot.edit_message_text(message.chat.id, message.id, error_text)
+//                     .reply_markup(retry_keyboard)
+//                     .await?;
+//             }
+//         }
+//     } else {
+//         bot.edit_message_text(
+//             message.chat.id,
+//             message.id,
+//             "❌ Не удалось найти голосовое сообщение.",
+//         )
+//         .parse_mode(ParseMode::Html)
+//         .await?;
+//     }
+//     Ok(())
+// }
 
 pub async fn retry_speech_handler(
     bot: Bot,
@@ -472,11 +597,15 @@ pub async fn retry_speech_handler(
     action_type: &str,
     attempt: u32,
 ) -> Result<(), MyError> {
-    let Some(message) = query.message.and_then(|m| m.regular_message().cloned()) else {
+    let Some(message) = query
+        .message
+        .as_ref()
+        .and_then(|m| m.regular_message().cloned())
+    else {
         return Ok(());
     };
 
-    bot.answer_callback_query(query.id).await?;
+    bot.answer_callback_query(query.clone().id).await?;
 
     if attempt >= 1 {
         bot.edit_message_text(message.chat.id, message.id, "❌ Лимит попыток исчерпан.")
@@ -484,220 +613,376 @@ pub async fn retry_speech_handler(
         return Ok(());
     }
 
+    let owner = Owner {
+        id: message.chat.id.to_string(),
+        r#type: if message.chat.is_private() {
+            "user".to_string()
+        } else {
+            "group".to_string()
+        },
+    };
+    let settings: SpeechRecognitionSettings = DbSettings::get_module_settings(&owner, "speech")
+        .await
+        .unwrap_or_default();
+
     let bot_message_id = message.id.0;
     let new_attempt = attempt + 1;
 
     let Some(replied_to_audio_message_id) = message.reply_to_message().map(|m| m.id.0) else {
-        bot.edit_message_text(
-            message.chat.id,
-            message.id,
-            "❌ Не удалось найти исходное сообщение для повторной попытки.",
-        )
-        .await?;
         return Ok(());
     };
-
     let cache = config.get_redis_client();
     let message_file_map_key = format!("message_file_map:{}", bot_message_id);
-
     let Some(file_unique_id): Option<String> = cache.get::<String>(&message_file_map_key).await?
     else {
+        return Ok(());
+    };
+    let file_cache_key = format!("transcription_by_file:{}", file_unique_id);
+
+    if action_type == "transcribe" {
         bot.edit_message_text(
             message.chat.id,
             message.id,
-            "❌ Кэш для повторной попытки не найден.",
+            "🔁 Повторная обработка аудио...",
         )
         .await?;
-        return Ok(());
-    };
 
-    let file_cache_key = format!("transcription_by_file:{}", file_unique_id);
+        let Some(cache_entry_template): Option<TranscriptionCache> =
+            cache.get(&file_cache_key).await?
+        else {
+            return Ok(());
+        };
+        let file = AudioStruct {
+            mime_type: cache_entry_template.mime_type,
+            file_id: cache_entry_template.file_id,
+            file_unique_id: file_unique_id.clone(),
+        };
 
-    match action_type {
-        "transcribe" => {
-            bot.edit_message_text(
-                message.chat.id,
-                message.id,
-                "🔁 Повторная обработка аудио...",
-            )
-            .await?;
+        cache.delete(&file_cache_key).await?;
 
-            let Some(cache_entry_template): Option<TranscriptionCache> =
-                cache.get(&file_cache_key).await?
-            else {
-                info!("{}", &file_cache_key);
+        match get_cached(
+            &bot,
+            &file,
+            config,
+            true,
+            settings.transcription_model.api_key().to_string(),
+        )
+        .await
+        {
+            Ok(cache_entry) => {
+                let text_parts = split_text(&cache_entry.full_text, 4000);
+                let keyboard = create_transcription_keyboard(0, text_parts.len(), query.from.id.0);
                 bot.edit_message_text(
                     message.chat.id,
                     message.id,
-                    "❌ Не удалось получить метаданные аудио.",
+                    format!(
+                        "<blockquote expandable>{}</blockquote>",
+                        html::escape(&text_parts[0])
+                    ),
                 )
+                .parse_mode(ParseMode::Html)
+                .reply_markup(keyboard)
                 .await?;
+            }
+            Err(_) => {
+                let retry_keyboard =
+                    create_retry_keyboard(replied_to_audio_message_id, "transcribe", new_attempt);
+                bot.edit_message_text(message.chat.id, message.id, "❌ Ошибка при повторе.")
+                    .reply_markup(retry_keyboard)
+                    .await?;
+            }
+        }
+    } else {
+        let waiting_text = if action_type == "retell" {
+            "🔁 Повторный пересказ..."
+        } else {
+            "🔁 Повторные итоги..."
+        };
+        bot.edit_message_text(message.chat.id, message.id, waiting_text)
+            .await?;
+
+        let mut cache_entry = match cache.get::<TranscriptionCache>(&file_cache_key).await? {
+            Some(entry) => entry,
+            None => {
+                bot.edit_message_text(message.chat.id, message.id, "❌ Исходное аудио не найдено.")
+                    .await?;
                 return Ok(());
-            };
+            }
+        };
 
-            let file = AudioStruct {
-                mime_type: cache_entry_template.mime_type,
-                file_id: cache_entry_template.file_id,
-                file_unique_id: file_unique_id.clone(),
-            };
+        cache_entry.summary = None;
+        let file_data_result = save_file_to_memory(&bot, &cache_entry.file_id, config).await;
 
-            cache.delete(&file_cache_key).await?;
+        let new_summary_result = match file_data_result {
+            Ok(file_data) => {
+                summarize_audio(
+                    cache_entry.mime_type.clone(),
+                    file_data,
+                    config.clone(),
+                    action_type,
+                    settings.summary_model.api_key().to_string(),
+                )
+                .await
+            }
+            Err(e) => Err(e),
+        };
 
-            match get_cached(&bot, &file, config, true).await {
-                Ok(cache_entry) => {
-                    let text_parts = split_text(&cache_entry.full_text, 4000);
+        match new_summary_result {
+            Ok(new_summary)
+                if !new_summary.is_empty() && !new_summary.contains("Не удалось получить") =>
+            {
+                cache_entry.summary = Some(new_summary.clone());
+                cache_entry.attempt = 0;
+                cache.set(&file_cache_key, &cache_entry, 86400).await?;
 
-                    let keyboard =
-                        create_transcription_keyboard(0, text_parts.len(), query.from.id.0);
-                    bot.edit_message_text(
-                        message.chat.id,
-                        message.id,
-                        format!(
-                            "<blockquote expandable>{}</blockquote>",
-                            html::escape(&text_parts[0])
-                        ),
-                    )
+                let text_parts = split_text(&new_summary, 4000);
+                let icon = if action_type == "retell" {
+                    "📝"
+                } else {
+                    "✨"
+                };
+                let final_text = format!(
+                    "{}:\n<blockquote expandable>{}</blockquote>",
+                    icon,
+                    html::escape(&text_parts[0])
+                );
+                let keyboard = create_summary_pagination_keyboard(0, text_parts.len());
+                bot.edit_message_text(message.chat.id, message.id, final_text)
                     .parse_mode(ParseMode::Html)
                     .reply_markup(keyboard)
                     .await?;
-                }
-                Err(e) => {
-                    error!("Failed to get transcription on retry: {:?}", e);
-                    let error_text = match e {
-                        MyError::Other(msg) if msg.contains("❌ Не удалось преобразовать") => {
-                            msg
-                        }
-                        MyError::Reqwest(_) => {
-                            "❌ Ошибка: Не удалось скачать файл. Возможно, он слишком большой (>20MB)."
-                                .to_string()
-                        }
-                        _ => "❌ Произошла неизвестная ошибка при обработке аудио.".to_string(),
-                    };
-
-                    let retry_keyboard = create_retry_keyboard(
-                        replied_to_audio_message_id,
-                        "transcribe",
-                        new_attempt,
-                    );
-
-                    bot.edit_message_text(message.chat.id, message.id, error_text)
-                        .reply_markup(retry_keyboard)
-                        .await?;
-
-                    let empty_cache = TranscriptionCache {
-                        full_text: String::new(),
-                        summary: None,
-                        file_id: file.file_id.clone(),
-                        mime_type: file.mime_type.clone(),
-                        attempt: new_attempt,
-                    };
-                    cache.set(&file_cache_key, &empty_cache, 86400).await?;
-                }
             }
-        }
-        "summarize" | "retell" => {
-            let waiting_text = if action_type == "retell" {
-                "🔁 Повторное написание пересказа..."
-            } else {
-                "🔁 Повторное подведение итогов..."
-            };
-
-            bot.edit_message_text(message.chat.id, message.id, waiting_text)
-                .await?;
-
-            let mut cache_entry = match cache.get::<TranscriptionCache>(&file_cache_key).await? {
-                Some(entry) => entry,
-                None => {
-                    bot.edit_message_text(
-                        message.chat.id,
-                        message.id,
-                        "❌ Не удалось найти исходное аудио.",
-                    )
+            _ => {
+                cache_entry.attempt = new_attempt;
+                let retry_keyboard = create_retry_keyboard(
+                    replied_to_audio_message_id,
+                    action_type,
+                    cache_entry.attempt,
+                );
+                bot.edit_message_text(message.chat.id, message.id, "❌ Не удалось.")
+                    .reply_markup(retry_keyboard)
                     .await?;
-                    return Ok(());
-                }
-            };
-
-            cache_entry.summary = None;
-
-            let file_data_result = save_file_to_memory(&bot, &cache_entry.file_id, config).await;
-            let new_summary_result = match file_data_result {
-                Ok(file_data) => {
-                    summarize_audio(
-                        cache_entry.mime_type.clone(),
-                        file_data,
-                        config.clone(),
-                        action_type,
-                    )
-                    .await
-                }
-                Err(e) => {
-                    error!(
-                        "Failed to download file for summarization on retry: {:?}",
-                        e
-                    );
-                    Err(e)
-                }
-            };
-
-            match new_summary_result {
-                Ok(new_summary)
-                    if !new_summary.is_empty() && !new_summary.contains("Не удалось получить") =>
-                {
-                    cache_entry.summary = Some(new_summary.clone());
-                    cache_entry.attempt = 0;
-                    cache.set(&file_cache_key, &cache_entry, 86400).await?;
-
-                    let text_parts = split_text(&new_summary, 4000);
-                    let icon = if action_type == "retell" {
-                        "📝"
-                    } else {
-                        "✨"
-                    };
-                    let final_text = format!(
-                        "{}:\n<blockquote expandable>{}</blockquote>",
-                        icon,
-                        html::escape(&text_parts[0])
-                    );
-                    let keyboard = create_summary_pagination_keyboard(0, text_parts.len());
-
-                    bot.edit_message_text(message.chat.id, message.id, final_text)
-                        .parse_mode(ParseMode::Html)
-                        .reply_markup(keyboard)
-                        .await?;
-                }
-                _ => {
-                    let error_text = "❌ Не удалось выполнить операцию.";
-
-                    cache_entry.attempt = new_attempt;
-
-                    let retry_keyboard = create_retry_keyboard(
-                        replied_to_audio_message_id,
-                        action_type,
-                        cache_entry.attempt,
-                    );
-
-                    bot.edit_message_text(message.chat.id, message.id, error_text)
-                        .reply_markup(retry_keyboard)
-                        .await?;
-
-                    cache_entry.summary = None;
-                    cache.set(&file_cache_key, &cache_entry, 86400).await?;
-                }
+                cache.set(&file_cache_key, &cache_entry, 86400).await?;
             }
         }
-        _ => {
-            log::warn!("Unknown action type for retry: {}", action_type);
-            bot.edit_message_text(
-                message.chat.id,
-                message.id,
-                "❌ Неизвестный тип действия для повторной попытки.",
-            )
-            .await?;
-        }
+        // summarization_handler(bot, query, config).await?;
     }
-
     Ok(())
+
+    // let bot_message_id = message.id.0;
+    // let new_attempt = attempt + 1;
+    //
+    // let Some(replied_to_audio_message_id) = message.reply_to_message().map(|m| m.id.0) else {
+    //     bot.edit_message_text(
+    //         message.chat.id,
+    //         message.id,
+    //         "❌ Не удалось найти исходное сообщение для повторной попытки.",
+    //     )
+    //     .await?;
+    //     return Ok(());
+    // };
+    //
+    // let cache = config.get_redis_client();
+    // let message_file_map_key = format!("message_file_map:{}", bot_message_id);
+    //
+    // let Some(file_unique_id): Option<String> = cache.get::<String>(&message_file_map_key).await?
+    // else {
+    //     bot.edit_message_text(
+    //         message.chat.id,
+    //         message.id,
+    //         "❌ Кэш для повторной попытки не найден.",
+    //     )
+    //     .await?;
+    //     return Ok(());
+    // };
+    //
+    // let file_cache_key = format!("transcription_by_file:{}", file_unique_id);
+    //
+    // match action_type {
+    //     "transcribe" => {
+    //         bot.edit_message_text(
+    //             message.chat.id,
+    //             message.id,
+    //             "🔁 Повторная обработка аудио...",
+    //         )
+    //         .await?;
+    //
+    //         let Some(cache_entry_template): Option<TranscriptionCache> =
+    //             cache.get(&file_cache_key).await?
+    //         else {
+    //             info!("{}", &file_cache_key);
+    //             bot.edit_message_text(
+    //                 message.chat.id,
+    //                 message.id,
+    //                 "❌ Не удалось получить метаданные аудио.",
+    //             )
+    //             .await?;
+    //             return Ok(());
+    //         };
+    //
+    //         let file = AudioStruct {
+    //             mime_type: cache_entry_template.mime_type,
+    //             file_id: cache_entry_template.file_id,
+    //             file_unique_id: file_unique_id.clone(),
+    //         };
+    //
+    //         cache.delete(&file_cache_key).await?;
+    //
+    //         match get_cached(&bot, &file, config, true).await {
+    //             Ok(cache_entry) => {
+    //                 let text_parts = split_text(&cache_entry.full_text, 4000);
+    //
+    //                 let keyboard =
+    //                     create_transcription_keyboard(0, text_parts.len(), query.from.id.0);
+    //                 bot.edit_message_text(
+    //                     message.chat.id,
+    //                     message.id,
+    //                     format!(
+    //                         "<blockquote expandable>{}</blockquote>",
+    //                         html::escape(&text_parts[0])
+    //                     ),
+    //                 )
+    //                 .parse_mode(ParseMode::Html)
+    //                 .reply_markup(keyboard)
+    //                 .await?;
+    //             }
+    //             Err(e) => {
+    //                 error!("Failed to get transcription on retry: {:?}", e);
+    //                 let error_text = match e {
+    //                     MyError::Other(msg) if msg.contains("❌ Не удалось преобразовать") => {
+    //                         msg
+    //                     }
+    //                     MyError::Reqwest(_) => {
+    //                         "❌ Ошибка: Не удалось скачать файл. Возможно, он слишком большой (>20MB)."
+    //                             .to_string()
+    //                     }
+    //                     _ => "❌ Произошла неизвестная ошибка при обработке аудио.".to_string(),
+    //                 };
+    //
+    //                 let retry_keyboard = create_retry_keyboard(
+    //                     replied_to_audio_message_id,
+    //                     "transcribe",
+    //                     new_attempt,
+    //                 );
+    //
+    //                 bot.edit_message_text(message.chat.id, message.id, error_text)
+    //                     .reply_markup(retry_keyboard)
+    //                     .await?;
+    //
+    //                 let empty_cache = TranscriptionCache {
+    //                     full_text: String::new(),
+    //                     summary: None,
+    //                     file_id: file.file_id.clone(),
+    //                     mime_type: file.mime_type.clone(),
+    //                     attempt: new_attempt,
+    //                 };
+    //                 cache.set(&file_cache_key, &empty_cache, 86400).await?;
+    //             }
+    //         }
+    //     }
+    //     "summarize" | "retell" => {
+    //         let waiting_text = if action_type == "retell" {
+    //             "🔁 Повторное написание пересказа..."
+    //         } else {
+    //             "🔁 Повторное подведение итогов..."
+    //         };
+    //
+    //         bot.edit_message_text(message.chat.id, message.id, waiting_text)
+    //             .await?;
+    //
+    //         let mut cache_entry = match cache.get::<TranscriptionCache>(&file_cache_key).await? {
+    //             Some(entry) => entry,
+    //             None => {
+    //                 bot.edit_message_text(
+    //                     message.chat.id,
+    //                     message.id,
+    //                     "❌ Не удалось найти исходное аудио.",
+    //                 )
+    //                 .await?;
+    //                 return Ok(());
+    //             }
+    //         };
+    //
+    //         cache_entry.summary = None;
+    //
+    //         let file_data_result = save_file_to_memory(&bot, &cache_entry.file_id, config).await;
+    //         let new_summary_result = match file_data_result {
+    //             Ok(file_data) => {
+    //                 summarize_audio(
+    //                     cache_entry.mime_type.clone(),
+    //                     file_data,
+    //                     config.clone(),
+    //                     action_type,
+    //                 )
+    //                 .await
+    //             }
+    //             Err(e) => {
+    //                 error!(
+    //                     "Failed to download file for summarization on retry: {:?}",
+    //                     e
+    //                 );
+    //                 Err(e)
+    //             }
+    //         };
+    //
+    //         match new_summary_result {
+    //             Ok(new_summary)
+    //                 if !new_summary.is_empty() && !new_summary.contains("Не удалось получить") =>
+    //             {
+    //                 cache_entry.summary = Some(new_summary.clone());
+    //                 cache_entry.attempt = 0;
+    //                 cache.set(&file_cache_key, &cache_entry, 86400).await?;
+    //
+    //                 let text_parts = split_text(&new_summary, 4000);
+    //                 let icon = if action_type == "retell" {
+    //                     "📝"
+    //                 } else {
+    //                     "✨"
+    //                 };
+    //                 let final_text = format!(
+    //                     "{}:\n<blockquote expandable>{}</blockquote>",
+    //                     icon,
+    //                     html::escape(&text_parts[0])
+    //                 );
+    //                 let keyboard = create_summary_pagination_keyboard(0, text_parts.len());
+    //
+    //                 bot.edit_message_text(message.chat.id, message.id, final_text)
+    //                     .parse_mode(ParseMode::Html)
+    //                     .reply_markup(keyboard)
+    //                     .await?;
+    //             }
+    //             _ => {
+    //                 let error_text = "❌ Не удалось выполнить операцию.";
+    //
+    //                 cache_entry.attempt = new_attempt;
+    //
+    //                 let retry_keyboard = create_retry_keyboard(
+    //                     replied_to_audio_message_id,
+    //                     action_type,
+    //                     cache_entry.attempt,
+    //                 );
+    //
+    //                 bot.edit_message_text(message.chat.id, message.id, error_text)
+    //                     .reply_markup(retry_keyboard)
+    //                     .await?;
+    //
+    //                 cache_entry.summary = None;
+    //                 cache.set(&file_cache_key, &cache_entry, 86400).await?;
+    //             }
+    //         }
+    //     }
+    //     _ => {
+    //         log::warn!("Unknown action type for retry: {}", action_type);
+    //         bot.edit_message_text(
+    //             message.chat.id,
+    //             message.id,
+    //             "❌ Неизвестный тип действия для повторной попытки.",
+    //         )
+    //         .await?;
+    //     }
+    // }
+    //
+    // Ok(())
 }
 
 pub async fn summarize_audio(
@@ -705,6 +990,7 @@ pub async fn summarize_audio(
     data: Bytes,
     config: Config,
     action_type: &str,
+    model: String,
 ) -> Result<String, MyError> {
     let mut settings = Settings::new();
     settings.set_all_safety_settings(HarmBlockThreshold::BlockNone);
@@ -716,7 +1002,7 @@ pub async fn summarize_audio(
     };
     settings.set_system_instruction(&prompt);
 
-    let ai_model = config.get_json_config().get_ai_model().to_owned();
+    // let ai_model = config.get_json_config().get_ai_model().to_owned();
 
     let file_manager = FileManager::new();
 
@@ -731,7 +1017,8 @@ pub async fn summarize_audio(
         .map_err(|e| MyError::from(e))?;
 
     let mut client = GemSession::Builder()
-        .custom_model(ai_model)
+        // .custom_model(Models:)
+        .model(Models::Custom(model))
         .timeout(Some(std::time::Duration::from_secs(120)))
         .build();
 
@@ -818,7 +1105,7 @@ impl Transcription {
         settings.set_all_safety_settings(HarmBlockThreshold::BlockNone);
 
         let error_answer = "❌ Не удалось преобразовать текст из сообщения.".to_string();
-        let ai_model = self.config.get_json_config().get_ai_model().to_owned();
+        // let ai_model = self.config.get_json_config().get_ai_model().to_owned();
         let prompt = self.config.get_json_config().get_ai_prompt().to_owned();
         settings.set_system_instruction(&prompt);
 
@@ -838,7 +1125,7 @@ impl Transcription {
         };
 
         let mut client = GemSession::Builder()
-            .model(Models::Custom(ai_model))
+            .model(Models::Custom(self.custom_model.to_string()))
             .timeout(Some(Duration::from_secs(120)))
             .build();
 
