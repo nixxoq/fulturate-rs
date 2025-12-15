@@ -5,6 +5,7 @@ pub mod cobalt;
 pub mod currency;
 pub mod math;
 pub mod registry;
+pub mod speech_recognition;
 pub mod translate;
 pub mod whisper;
 
@@ -110,6 +111,7 @@ pub fn create_radio_row<T, F>(
     current_val: &T,
     options: &[T],
     base_callback: &str,
+    commander_id: u64,
     display_fn: F,
 ) -> Vec<InlineKeyboardButton>
 where
@@ -124,7 +126,7 @@ where
             } else {
                 display_fn(opt)
             };
-            let cb_data = format!("{}:{}", base_callback, display_fn(opt));
+            let cb_data = format!("{}:{}:{}", base_callback, display_fn(opt), commander_id);
             InlineKeyboardButton::callback(label, cb_data)
         })
         .collect()
