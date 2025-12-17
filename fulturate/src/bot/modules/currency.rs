@@ -1,10 +1,8 @@
 use crate::{
-    bot::modules::{
-        Module, ModuleSettings, Owner, standard_back_button, standard_settings_header,
-        standard_toggle_button,
-    },
+    bot::modules::{Module, ModuleSettings, Owner},
     core::{
-        db::schemas::{group::Group, settings::Settings, user::User},
+        config::Config,
+        db::schemas::{group::Group, settings::Settings, user::User as DbUser},
         services::{
             currencier::handle_currency_update,
             currency::converter::{
@@ -13,9 +11,12 @@ use crate::{
         },
     },
     errors::MyError,
-    module,
-    util::paginator::{ItemsBuild, Paginator},
+    util::{
+        i18n::get_locale_by_id,
+        paginator::{ItemsBuild, Paginator},
+    },
 };
+use rust_i18n::t;
 use serde::{Deserialize, Serialize};
 use teloxide::{
     prelude::*,
@@ -135,15 +136,51 @@ impl CurrencyModule {
         page: usize,
         commander_id: u64,
     ) -> Result<(String, InlineKeyboardMarkup), MyError> {
+        let config = Config::new().await;
+        let locale = get_locale_by_id(commander_id, &config).await;
+
         let settings: CurrencySettings = Settings::get_module_settings(owner, self.key()).await?;
 
-        let text = format!(
-            "{}\n\nВыберите валюты для отображения.",
-            standard_settings_header(self.name(), self.description(), settings.enabled)
+        let status_key = if settings.enabled {
+            "modules.status_on"
+        } else {
+            "modules.status_off"
+        };
+        let status_text = t!(status_key, locale = &locale);
+
+        let module_name = t!("modules.currency.name", locale = &locale);
+        let module_desc = t!("modules.currency.desc", locale = &locale);
+
+        let header_info = t!(
+            "modules.status_header",
+            locale = &locale,
+            name = module_name,
+            desc = module_desc,
+            status = status_text
         );
 
-        let toggle_btn = standard_toggle_button(self.key(), settings.enabled, commander_id);
-        let back_btn = standard_back_button(owner, commander_id);
+        let select_text = t!("modules.currency.select_header", locale = &locale);
+
+        let text = format!("{}\n\n{}", header_info, select_text);
+
+        let toggle_key = if settings.enabled {
+            "settings.toggle_off"
+        } else {
+            "settings.toggle_on"
+        };
+        let toggle_btn = InlineKeyboardButton::callback(
+            t!(toggle_key, locale = &locale),
+            format!("{}:toggle_module", self.key()),
+        );
+
+        let back_btn = InlineKeyboardButton::callback(
+            t!("common.back", locale = &locale),
+            format!(
+                "settings_back:{}:{}:{}",
+                owner.r#type, owner.id, commander_id
+            ),
+        );
+
         let all_currencies = get_all_currency_codes(CURRENCY_CONFIG_PATH.parse().unwrap())?;
 
         let mut keyboard = Paginator::from(self.key(), &all_currencies)
@@ -152,19 +189,12 @@ impl CurrencyModule {
             .current_page(page)
             .add_bottom_row(vec![back_btn])
             .set_callback_prefix(format!("{}:settings", self.key()))
-            .set_callback_formatter(move |p| {
-                format!("{}:settings:page:{}:{}", self.key(), p, commander_id)
-            })
+            .set_callback_formatter(move |p| format!("{}:settings:page:{}", self.key(), p))
             .build(|currency| {
                 let is_selected = settings.selected_codes.contains(&currency.code);
                 let icon = if is_selected { "✅" } else { "❌" };
                 let label = format!("{} {}", icon, currency.code);
-                let cb_data = format!(
-                    "{}:settings:toggle:{}:{}",
-                    self.key(),
-                    currency.code,
-                    commander_id
-                );
+                let cb_data = format!("{}:settings:toggle:{}", self.key(), currency.code);
                 InlineKeyboardButton::callback(label, cb_data)
             });
 
@@ -176,7 +206,7 @@ impl CurrencyModule {
 
 pub async fn currency_codes_handler(bot: Bot, msg: Message, code: String) -> Result<(), MyError> {
     if msg.chat.is_private() {
-        handle_currency_update::<User>(bot, msg, code).await
+        handle_currency_update::<DbUser>(bot, msg, code).await
     } else {
         handle_currency_update::<Group>(bot, msg, code).await
     }

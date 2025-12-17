@@ -1,59 +1,32 @@
-use crate::bot::modules::Owner;
-use crate::bot::modules::registry::MOD_MANAGER;
-use crate::core::db::schemas::settings::Settings;
-use crate::errors::MyError;
+use crate::{
+    bot::modules::{Owner, registry::MOD_MANAGER},
+    core::{config::Config, db::schemas::settings::Settings},
+    errors::MyError,
+    util::i18n::get_user_locale,
+};
+use rust_i18n::{available_locales, t};
 use teloxide::prelude::*;
-use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, MaybeInaccessibleMessage};
+use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup};
 
-pub async fn settings_command_handler(bot: Bot, message: Message) -> Result<(), MyError> {
-    let commander_id = message.from.map(|u| u.id.0).ok_or(MyError::UserNotFound)?;
+pub async fn settings_command_handler(
+    bot: Bot,
+    message: Message,
+    config: &Config,
+) -> Result<(), MyError> {
+    let commander = message.from.as_ref().ok_or(MyError::UserNotFound)?;
+    let commander_id = commander.id.0;
 
     let owner_id = message.chat.id.to_string();
-    let owner_type = if message.chat.is_private() { "user" } else { "group" }.to_string();
+    let owner_type = if message.chat.is_private() {
+        "user"
+    } else {
+        "group"
+    }
+    .to_string();
 
-    let settings_doc = Settings::get_or_create(&Owner {
-        id: owner_id.clone(),
-        r#type: owner_type.clone(),
-    })
-        .await?;
+    let locale = get_user_locale(commander, config).await;
 
-    let text = String::from(
-        "⚙️ <b>Настройки модулей</b>\n\n\
-        Нажмите на кнопку, чтобы включить или выключить соответствующий модуль.\n\
-        ✅ – модуль включён\n\
-        ❌ – модуль выключен\n\n"
-    );
-
-    let mut kb_buttons: Vec<Vec<InlineKeyboardButton>> = MOD_MANAGER
-        .get_designed_modules(&owner_type)
-        .into_iter()
-        .map(|module| {
-            let settings: serde_json::Value = settings_doc
-                .modules
-                .get(module.key())
-                .cloned()
-                .unwrap_or_default();
-
-            let is_enabled = settings.get("enabled").and_then(|v| v.as_bool()).unwrap_or(false);
-
-            let status = if is_enabled { "✅" } else { "❌" };
-            let text = format!("{} — {}", status, module.name());
-
-            let callback_data = format!(
-                "module_select:{}:{}:{}:{}",
-                owner_type, owner_id, module.key(), commander_id
-            );
-
-            vec![InlineKeyboardButton::callback(text, callback_data)]
-        })
-        .collect();
-
-    kb_buttons.push(vec![InlineKeyboardButton::callback(
-        "🗑️ Удалить данные с бота",
-        format!("delete_data:{}", commander_id),
-    )]);
-
-    let keyboard = InlineKeyboardMarkup::new(kb_buttons);
+    let (text, keyboard) = get_main_settings_menu(&locale, &owner_type, &owner_id, commander_id);
 
     bot.send_message(message.chat.id, text)
         .parse_mode(teloxide::types::ParseMode::Html)
@@ -63,28 +36,91 @@ pub async fn settings_command_handler(bot: Bot, message: Message) -> Result<(), 
     Ok(())
 }
 
-pub async fn update_settings_message(
-    bot: Bot,
-    message: MaybeInaccessibleMessage,
-    owner_id: String,
-    owner_type: String,
+pub fn get_main_settings_menu(
+    locale: &str,
+    owner_type: &str,
+    owner_id: &str,
     commander_id: u64,
-) -> Result<(), MyError> {
-    let settings_doc = Settings::get_or_create(&Owner {
-        id: owner_id.clone(),
-        r#type: owner_type.clone(),
-    })
-        .await?;
+) -> (String, InlineKeyboardMarkup) {
+    let text = t!("settings.main_header", locale = locale);
 
-    let text = String::from(
-        "⚙️ <b>Настройки модулей</b>\n\n\
-        Нажмите на кнопку, чтобы включить или выключить соответствующий модуль.\n\
-        ✅ – модуль включён\n\
-        ❌ – модуль выключен\n\n"
-    );
+    let buttons = vec![
+        vec![InlineKeyboardButton::callback(
+            t!("settings.btn_language", locale = locale),
+            format!("settings_lang:{}:{}:{}", owner_type, owner_id, commander_id),
+        )],
+        vec![InlineKeyboardButton::callback(
+            t!("settings.btn_modules", locale = locale),
+            format!(
+                "settings_modules:{}:{}:{}",
+                owner_type, owner_id, commander_id
+            ),
+        )],
+        vec![InlineKeyboardButton::callback(
+            t!("settings.btn_delete_data", locale = locale),
+            format!("delete_data:{}", commander_id),
+        )],
+    ];
+
+    (text.parse().unwrap(), InlineKeyboardMarkup::new(buttons))
+}
+
+pub fn get_lang_settings_menu(
+    locale: &str,
+    owner_type: &str,
+    owner_id: &str,
+    commander_id: u64,
+) -> (String, InlineKeyboardMarkup) {
+    let text = t!("settings.lang_header", locale = locale);
+
+    let available = available_locales!();
+    let mut lang_buttons = Vec::new();
+
+    for lang_code in available {
+        let label = t!("meta.lang", locale = lang_code);
+
+        let display_label = if label == "meta.lang" {
+            lang_code.to_uppercase()
+        } else {
+            label.to_string()
+        };
+
+        lang_buttons.push(InlineKeyboardButton::callback(
+            display_label,
+            format!(
+                "lang_set:{}:{}:{}:{}",
+                lang_code, owner_type, owner_id, commander_id
+            ),
+        ));
+    }
+
+    let mut rows: Vec<Vec<InlineKeyboardButton>> =
+        lang_buttons.chunks(2).map(|chunk| chunk.to_vec()).collect();
+
+    rows.push(vec![InlineKeyboardButton::callback(
+        t!("common.back", locale = locale),
+        format!("settings_main:{}:{}:{}", owner_type, owner_id, commander_id),
+    )]);
+
+    (text.to_string(), InlineKeyboardMarkup::new(rows))
+}
+
+pub async fn get_modules_settings_menu(
+    locale: &str,
+    owner_type: &str,
+    owner_id: &str,
+    commander_id: u64,
+) -> Result<(String, InlineKeyboardMarkup), MyError> {
+    let settings_doc = Settings::get_or_create(&Owner {
+        id: owner_id.to_string(),
+        r#type: owner_type.to_string(),
+    })
+    .await?;
+
+    let text = t!("settings.modules_header", locale = locale);
 
     let mut kb_buttons: Vec<Vec<InlineKeyboardButton>> = MOD_MANAGER
-        .get_designed_modules(&owner_type)
+        .get_designed_modules(owner_type)
         .into_iter()
         .map(|module| {
             let settings: serde_json::Value = settings_doc
@@ -92,34 +128,38 @@ pub async fn update_settings_message(
                 .get(module.key())
                 .cloned()
                 .unwrap_or_default();
-            let is_enabled = settings.get("enabled").and_then(|v| v.as_bool()).unwrap_or(false);
 
-            let status = if is_enabled { "✅" } else { "❌" };
-            let text = format!("{} — {}", status, module.name());
+            let is_enabled = settings
+                .get("enabled")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+
+            let key = format!("modules.{}.name", module.key());
+            let tr = t!(&key, locale = locale);
+
+            let status_icon = if is_enabled { "✅" } else { "❌" };
+            let btn_text = format!(
+                "{} — {}",
+                status_icon,
+                if tr == key { module.name() } else { &tr }
+            );
 
             let callback_data = format!(
                 "module_select:{}:{}:{}:{}",
-                owner_type, owner_id, module.key(), commander_id
+                owner_type,
+                owner_id,
+                module.key(),
+                commander_id
             );
 
-            vec![InlineKeyboardButton::callback(text, callback_data)]
+            vec![InlineKeyboardButton::callback(btn_text, callback_data)]
         })
         .collect();
 
     kb_buttons.push(vec![InlineKeyboardButton::callback(
-        "🗑️ Удалить данные с бота",
-        format!("delete_data:{}", commander_id),
+        t!("common.back", locale = locale),
+        format!("settings_main:{}:{}:{}", owner_type, owner_id, commander_id),
     )]);
 
-    let keyboard = InlineKeyboardMarkup::new(kb_buttons);
-
-    if let MaybeInaccessibleMessage::Regular(msg) = message {
-        let _ = bot
-            .edit_message_text(msg.chat.id, msg.id, text)
-            .parse_mode(teloxide::types::ParseMode::Html)
-            .reply_markup(keyboard)
-            .await;
-    }
-
-    Ok(())
+    Ok((text.parse().unwrap(), InlineKeyboardMarkup::new(kb_buttons)))
 }

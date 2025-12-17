@@ -17,7 +17,7 @@ pub async fn command_handlers(bot: Bot, message: Message, cmd: Command) -> Resul
             Command::Start(arg) => start_handler(bot, message, &config, arg).await,
             Command::Translate(arg) => translate_handler(bot, &message, &config, arg).await,
             Command::SpeechRecognition => speech_recognition_handler(bot, message, &config).await,
-            Command::Settings => settings_command_handler(bot, message).await,
+            Command::Settings => settings_command_handler(bot, message, &config).await,
         }
     });
     Ok(())

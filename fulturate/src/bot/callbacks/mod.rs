@@ -9,7 +9,9 @@ use crate::{
             translate::handle_translate_callback,
             whisper::handle_whisper_callback,
         },
-        commands::settings::update_settings_message,
+        commands::settings::{
+            get_lang_settings_menu, get_main_settings_menu, get_modules_settings_menu,
+        },
         modules::{Owner, registry::MOD_MANAGER},
     },
     core::{
@@ -19,13 +21,16 @@ use crate::{
         },
     },
     errors::MyError,
+    util::i18n::{get_user_locale, set_user_locale},
 };
 use log::info;
+use rust_i18n::t;
 use std::sync::Arc;
 use teloxide::{
     Bot,
     payloads::{AnswerCallbackQuerySetters, EditMessageTextSetters},
     prelude::{CallbackQuery, Requester},
+    types::MaybeInaccessibleMessage,
 };
 
 pub mod cobalt_pagination;
@@ -34,6 +39,27 @@ pub mod translate;
 pub mod whisper;
 
 enum CallbackAction<'a> {
+    SettingsMain {
+        owner_type: &'a str,
+        owner_id: &'a str,
+        commander_id: u64,
+    },
+    SettingsModules {
+        owner_type: &'a str,
+        owner_id: &'a str,
+        commander_id: u64,
+    },
+    SettingsLang {
+        owner_type: &'a str,
+        owner_id: &'a str,
+        commander_id: u64,
+    },
+    LangSet {
+        lang_code: &'a str,
+        owner_type: &'a str,
+        owner_id: &'a str,
+        commander_id: u64,
+    },
     ModuleSettings {
         module_key: &'a str,
         rest: &'a str,
@@ -74,6 +100,59 @@ enum CallbackAction<'a> {
 fn parse_callback_data(data: &'_ str) -> Option<CallbackAction<'_>> {
     if data == "noop" {
         return Some(CallbackAction::NoOp);
+    }
+
+    if let Some(rest) = data.strip_prefix("settings_main:") {
+        let parts: Vec<_> = rest.split(':').collect();
+        if parts.len() == 3
+            && let Ok(commander_id) = parts[2].parse()
+        {
+            return Some(CallbackAction::SettingsMain {
+                owner_type: parts[0],
+                owner_id: parts[1],
+                commander_id,
+            });
+        }
+    }
+
+    if let Some(rest) = data.strip_prefix("settings_modules:") {
+        let parts: Vec<_> = rest.split(':').collect();
+        if parts.len() == 3
+            && let Ok(commander_id) = parts[2].parse()
+        {
+            return Some(CallbackAction::SettingsModules {
+                owner_type: parts[0],
+                owner_id: parts[1],
+                commander_id,
+            });
+        }
+    }
+
+    if let Some(rest) = data.strip_prefix("settings_lang:") {
+        let parts: Vec<_> = rest.split(':').collect();
+        if parts.len() == 3
+            && let Ok(commander_id) = parts[2].parse()
+        {
+            return Some(CallbackAction::SettingsLang {
+                owner_type: parts[0],
+                owner_id: parts[1],
+                commander_id,
+            });
+        }
+    }
+
+    if let Some(rest) = data.strip_prefix("lang_set:") {
+        let parts: Vec<_> = rest.split(':').collect();
+        if parts.len() == 4
+            && let Ok(commander_id) = parts[3].parse()
+        {
+            return Some(CallbackAction::LangSet {
+                lang_code: parts[0],
+                owner_type: parts[1],
+                owner_id: parts[2],
+                commander_id,
+            });
+        }
     }
 
     if let Some(rest) = data.strip_prefix("module_select:") {
@@ -188,7 +267,110 @@ pub async fn callback_query_handlers(bot: Bot, q: CallbackQuery) -> Result<(), M
         return Ok(());
     };
 
+    let mut locale = get_user_locale(&q.from, &config).await;
+
     match parse_callback_data(data) {
+        Some(CallbackAction::SettingsMain {
+            owner_type,
+            owner_id,
+            commander_id,
+        }) => {
+            if q.from.id.0 != commander_id {
+                bot.answer_callback_query(q.id)
+                    .text(t!("errors.no_permission", locale = locale))
+                    .show_alert(true)
+                    .await?;
+                return Ok(());
+            }
+
+            let Some(MaybeInaccessibleMessage::Regular(msg)) = q.message else {
+                return Ok(());
+            };
+
+            let (text, kb) = get_main_settings_menu(&locale, owner_type, owner_id, commander_id);
+            bot.edit_message_text(msg.chat.id, msg.id, text)
+                .reply_markup(kb)
+                .parse_mode(teloxide::types::ParseMode::Html)
+                .await?;
+        }
+        Some(CallbackAction::SettingsLang {
+            owner_type,
+            owner_id,
+            commander_id,
+        }) => {
+            if q.from.id.0 != commander_id {
+                bot.answer_callback_query(q.id)
+                    .text(t!("errors.no_permission", locale = locale))
+                    .show_alert(true)
+                    .await?;
+                return Ok(());
+            }
+
+            let Some(MaybeInaccessibleMessage::Regular(msg)) = q.message else {
+                return Ok(());
+            };
+
+            let (text, kb) = get_lang_settings_menu(&locale, owner_type, owner_id, commander_id);
+            bot.edit_message_text(msg.chat.id, msg.id, text)
+                .reply_markup(kb)
+                .parse_mode(teloxide::types::ParseMode::Html)
+                .await?;
+        }
+        Some(CallbackAction::LangSet {
+            lang_code,
+            owner_type,
+            owner_id,
+            commander_id,
+        }) => {
+            if q.from.id.0 != commander_id {
+                bot.answer_callback_query(q.id)
+                    .text(t!("errors.no_permission", locale = locale))
+                    .show_alert(true)
+                    .await?;
+                return Ok(());
+            }
+
+            set_user_locale(q.from.id.0, lang_code, &config).await?;
+            locale = lang_code.to_string();
+
+            bot.answer_callback_query(q.id)
+                .text(t!("settings.lang_selected_alert", locale = &locale))
+                .await?;
+
+            let Some(MaybeInaccessibleMessage::Regular(msg)) = q.message else {
+                return Ok(());
+            };
+
+            let (text, kb) = get_main_settings_menu(&locale, owner_type, owner_id, commander_id);
+            bot.edit_message_text(msg.chat.id, msg.id, text)
+                .reply_markup(kb)
+                .parse_mode(teloxide::types::ParseMode::Html)
+                .await?;
+        }
+        Some(CallbackAction::SettingsModules {
+            owner_type,
+            owner_id,
+            commander_id,
+        }) => {
+            if q.from.id.0 != commander_id {
+                bot.answer_callback_query(q.id)
+                    .text(t!("errors.no_permission", locale = locale))
+                    .show_alert(true)
+                    .await?;
+                return Ok(());
+            }
+
+            let Some(MaybeInaccessibleMessage::Regular(msg)) = q.message else {
+                return Ok(());
+            };
+
+            let (text, kb) =
+                get_modules_settings_menu(&locale, owner_type, owner_id, commander_id).await?;
+            bot.edit_message_text(msg.chat.id, msg.id, text)
+                .reply_markup(kb)
+                .parse_mode(teloxide::types::ParseMode::Html)
+                .await?;
+        }
         Some(CallbackAction::ModuleSelect {
             owner_type,
             owner_id,
@@ -202,19 +384,22 @@ pub async fn callback_query_handlers(bot: Bot, q: CallbackQuery) -> Result<(), M
             );
             if q.from.id.0 != commander_id {
                 bot.answer_callback_query(q.id)
-                    .text("❌ Вы не можете управлять этими настройками.")
+                    .text(t!("errors.no_permission", locale = locale))
                     .show_alert(true)
                     .await?;
                 return Ok(());
             }
-            if let (Some(module), Some(message)) = (MOD_MANAGER.get_module(module_key), &q.message)
-            {
+            if let Some(module) = MOD_MANAGER.get_module(module_key) {
+                let Some(MaybeInaccessibleMessage::Regular(msg)) = q.message else {
+                    return Ok(());
+                };
+
                 let owner = Owner {
                     id: owner_id.to_string(),
                     r#type: owner_type.to_string(),
                 };
                 let (text, keyboard) = module.get_settings_ui(&owner, commander_id).await?;
-                bot.edit_message_text(message.chat().id, message.id(), text)
+                bot.edit_message_text(msg.chat.id, msg.id, text)
                     .reply_markup(keyboard)
                     .parse_mode(teloxide::types::ParseMode::Html)
                     .await?;
@@ -232,21 +417,22 @@ pub async fn callback_query_handlers(bot: Bot, q: CallbackQuery) -> Result<(), M
             );
             if q.from.id.0 != commander_id {
                 bot.answer_callback_query(q.id)
-                    .text("❌ Вы не можете управлять этими настройками.")
+                    .text(t!("errors.no_permission", locale = locale))
                     .show_alert(true)
                     .await?;
                 return Ok(());
             }
-            if let Some(message) = q.message {
-                update_settings_message(
-                    bot,
-                    message,
-                    owner_id.to_string(),
-                    owner_type.to_string(),
-                    commander_id,
-                )
+
+            let Some(MaybeInaccessibleMessage::Regular(message)) = q.message else {
+                return Ok(());
+            };
+
+            let (text, kb) =
+                get_modules_settings_menu(&locale, owner_type, owner_id, commander_id).await?;
+            bot.edit_message_text(message.chat.id, message.id, text)
+                .reply_markup(kb)
+                .parse_mode(teloxide::types::ParseMode::Html)
                 .await?;
-            }
         }
         Some(CallbackAction::ModuleSettings {
             module_key,
@@ -258,18 +444,19 @@ pub async fn callback_query_handlers(bot: Bot, q: CallbackQuery) -> Result<(), M
                 q.from.clone().id.0,
                 commander_id
             );
-            if q.from.id.0 != commander_id {
+            if q.from.id.0 != commander_id && commander_id != 0 {
                 bot.answer_callback_query(q.id)
-                    .text("❌ Вы не можете управлять этими настройками.")
+                    .text(t!("errors.no_permission", locale = locale))
                     .show_alert(true)
                     .await?;
                 return Ok(());
             }
-            if let (Some(module), Some(message)) = (MOD_MANAGER.get_module(module_key), &q.message)
+            if let Some(module) = MOD_MANAGER.get_module(module_key)
+                && let Some(MaybeInaccessibleMessage::Regular(msg)) = &q.message
             {
                 let owner = Owner {
-                    id: message.chat().id.to_string(),
-                    r#type: (if message.chat().is_private() {
+                    id: msg.chat.id.to_string(),
+                    r#type: (if msg.chat.is_private() {
                         "user"
                     } else {
                         "group"
@@ -284,7 +471,7 @@ pub async fn callback_query_handlers(bot: Bot, q: CallbackQuery) -> Result<(), M
         Some(CallbackAction::DeleteData { commander_id }) => {
             if q.from.id.0 != commander_id {
                 bot.answer_callback_query(q.id)
-                    .text("❌ Вы не можете управлять этими настройками.")
+                    .text(t!("errors.no_permission", locale = locale))
                     .show_alert(true)
                     .await?;
                 return Ok(());

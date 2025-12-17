@@ -1,9 +1,10 @@
-use crate::bot::modules::Owner;
-use crate::core::config::Config;
-use crate::core::db::schemas::settings::Settings;
+use crate::{
+    bot::modules::Owner,
+    core::{config::Config, db::schemas::settings::Settings},
+};
 use mongodb::bson::doc;
 use oximod::ModelTrait;
-use teloxide::types::User;
+use teloxide::types::{User, UserId};
 
 pub const DEFAULT_LOCALE: &str = "en";
 
@@ -16,6 +17,20 @@ pub fn normalize_lang_code(code: Option<&str>) -> String {
         .filter(|c| is_supported(c))
         .unwrap_or(DEFAULT_LOCALE)
         .to_string()
+}
+
+pub async fn get_locale_by_id(user_id: u64, config: &Config) -> String {
+    let dummy_user = User {
+        id: UserId(user_id),
+        is_bot: false,
+        first_name: "".to_string(),
+        last_name: None,
+        username: None,
+        language_code: None,
+        is_premium: false,
+        added_to_attachment_menu: false,
+    };
+    get_user_locale(&dummy_user, config).await
 }
 
 pub async fn get_user_locale(user: &User, config: &Config) -> String {

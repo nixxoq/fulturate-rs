@@ -16,7 +16,6 @@ macro_rules! module {
         #[async_trait::async_trait]
         impl $crate::bot::modules::Module for $mod_name {
             fn key(&self) -> &'static str { $key }
-            // FIX: Changed $mod_name to $name
             fn name(&self) -> &'static str { $name }
             fn description(&self) -> &'static str { $desc }
 
@@ -63,20 +62,59 @@ macro_rules! module {
                     owner: &$crate::bot::modules::Owner,
                     commander_id: u64,
                 ) -> Result<(String, teloxide::types::InlineKeyboardMarkup), $crate::errors::MyError> {
-                    use $crate::bot::modules::{standard_settings_header, standard_toggle_button, standard_back_button};
-                    use $crate::core::db::schemas::settings::Settings;
-                    use teloxide::types::InlineKeyboardMarkup;
-                    use $crate::bot::modules::SimpleModuleSettings; // Explicit import to avoid ambiguity
+                    use $crate::{
+                        core::{db::schemas::settings::Settings, config::Config},
+                        bot::modules::SimpleModuleSettings,
+                        util::i18n::get_locale_by_id,
+                    };
+                    use teloxide::types::{InlineKeyboardMarkup, InlineKeyboardButton};
+                    use rust_i18n::t;
+
+                    let config = Config::new().await;
+                    let locale = get_locale_by_id(commander_id, &config).await;
 
                     let settings: SimpleModuleSettings = Settings::get_module_settings(owner, self.key()).await?;
 
-                    let text = standard_settings_header(self.name(), self.description(), settings.enabled);
+                    let name_key = format!("modules.{}.name", self.key());
+                    let desc_key = format!("modules.{}.desc", self.key());
+
+                    let module_name = t!(&name_key, locale = &locale);
+                    let module_desc = t!(&desc_key, locale = &locale);
+
+                    let status_key = if settings.enabled { "modules.status_on" } else { "modules.status_off" };
+                    let status_text = t!(status_key, locale = &locale);
+
+                    let text = t!("modules.status_header",
+                        locale = &locale,
+                        name = module_name,
+                        desc = module_desc,
+                        status = status_text
+                    );
+
+                    let toggle_key = if settings.enabled { "settings.toggle_off" } else { "settings.toggle_on" };
+                    let toggle_btn = InlineKeyboardButton::callback(
+                        t!(toggle_key, locale = &locale),
+                        format!("{}:settings:toggle_module:{}", self.key(), commander_id),
+                    );
+
+                    let back_btn = InlineKeyboardButton::callback(
+                        t!("common.back", locale = &locale),
+                        format!("settings_back:{}:{}:{}", owner.r#type, owner.id, commander_id),
+                    );
+
                     let keyboard = InlineKeyboardMarkup::new(vec![
-                        vec![standard_toggle_button(self.key(), settings.enabled, commander_id)],
-                        vec![standard_back_button(owner, commander_id)],
+                        vec![toggle_btn],
+                        vec![back_btn],
                     ]);
 
-                    Ok((text, keyboard))
+                    Ok((text.to_string(), keyboard))
+                    // let text = standard_settings_header(self.name(), self.description(), settings.enabled);
+                    // let keyboard = InlineKeyboardMarkup::new(vec![
+                    //     vec![standard_toggle_button(self.key(), settings.enabled, commander_id)],
+                    //     vec![standard_back_button(owner, commander_id)],
+                    // ]);
+                    //
+                    // Ok((text, keyboard))
                 }
 
                 async fn handle_callback(

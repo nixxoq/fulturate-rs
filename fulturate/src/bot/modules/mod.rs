@@ -72,41 +72,6 @@ pub trait Module: Send + Sync {
     fn factory_settings(&self) -> Result<serde_json::Value, MyError>;
 }
 
-// TODO: i18n stuff
-pub fn standard_settings_header(name: &str, desc: &str, enabled: bool) -> String {
-    format!(
-        "⚙️ <b>Настройки модуля</b>: {}\n<blockquote>{}</blockquote>\nСтатус: {}",
-        name,
-        desc,
-        if enabled {
-            "✅ Включен"
-        } else {
-            "❌ Выключен"
-        }
-    )
-}
-
-pub fn standard_toggle_button(key: &str, enabled: bool, commander_id: u64) -> InlineKeyboardButton {
-    InlineKeyboardButton::callback(
-        if enabled {
-            "Выключить модуль"
-        } else {
-            "Включить модуль"
-        },
-        format!("{}:settings:toggle_module:{}", key, commander_id),
-    )
-}
-
-pub fn standard_back_button(owner: &Owner, commander_id: u64) -> InlineKeyboardButton {
-    InlineKeyboardButton::callback(
-        "⬅️ Назад",
-        format!(
-            "settings_back:{}:{}:{}",
-            owner.r#type, owner.id, commander_id
-        ),
-    )
-}
-
 pub fn create_radio_row<T, F>(
     current_val: &T,
     options: &[T],

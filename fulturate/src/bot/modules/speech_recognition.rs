@@ -1,12 +1,10 @@
 use crate::{
-    bot::modules::{
-        Module, ModuleSettings, Owner, create_radio_row, standard_back_button,
-        standard_settings_header, standard_toggle_button,
-    },
-    core::db::schemas::settings::Settings,
+    bot::modules::{Module, ModuleSettings, Owner},
+    core::{config::Config, db::schemas::settings::Settings},
     errors::MyError,
-    module,
+    util::i18n::get_locale_by_id,
 };
+use rust_i18n::t;
 use serde::{Deserialize, Serialize};
 use teloxide::{
     prelude::*,
@@ -72,7 +70,7 @@ module! {
     settings = SpeechRecognitionSettings;
     key = "speech";
     name = "Speech Recognition";
-    desc = "Модуль для обработки, расшифровки и пересказа голосовы  х сообщений.";
+    desc = "Модуль для обработки, расшифровки и пересказа голосовых сообщений.";
     designed_for = "all";
 
     impl {
@@ -157,33 +155,84 @@ impl SpeechRecognitionModule {
         cid: u64,
     ) -> Result<(String, InlineKeyboardMarkup), MyError> {
         let s: SpeechRecognitionSettings = Settings::get_module_settings(owner, self.key()).await?;
+        let config = Config::new().await;
+        let locale = get_locale_by_id(cid, &config).await;
 
-        let text = format!(
-            "{}\n\n<b>🎙 Расшифровка:</b> {}\n<b>📝 Пересказ:</b> {}\n\nВыберите типы сообщений:",
-            standard_settings_header(self.name(), self.description(), s.enabled),
-            s.transcription_model.display_name(),
-            s.summary_model.display_name()
+        let module_name = t!("modules.speech.name", locale = &locale);
+        let module_desc = t!("modules.speech.desc", locale = &locale);
+        let status_key = if s.enabled {
+            "modules.status_on"
+        } else {
+            "modules.status_off"
+        };
+        let status_text = t!(status_key, locale = &locale);
+
+        let header = t!(
+            "modules.status_header",
+            locale = &locale,
+            name = module_name,
+            desc = module_desc,
+            status = status_text
         );
 
-        let toggle = |lbl: &str, val: bool, cb: &str| {
+        let trans_lbl = t!("modules.speech.transcription", locale = &locale);
+        let sum_lbl = t!("modules.speech.summary", locale = &locale);
+        let msg_types_lbl = t!("modules.speech.msg_types", locale = &locale);
+
+        let text = format!(
+            "{}\n\n<b>{}:</b> {}\n<b>{}:</b> {}\n\n{}",
+            header,
+            trans_lbl,
+            s.transcription_model.display_name(),
+            sum_lbl,
+            s.summary_model.display_name(),
+            msg_types_lbl
+        );
+
+        let toggle = |lbl: String, val: bool, cb: &str| {
             InlineKeyboardButton::callback(
                 format!("{} {}", if val { "✅" } else { "❌" }, lbl),
                 format!("{}:settings:{}:{}", self.key(), cb, cid),
             )
         };
 
+        let toggle_mod_key = if s.enabled {
+            "settings.toggle_off"
+        } else {
+            "settings.toggle_on"
+        };
+        let toggle_mod_btn = InlineKeyboardButton::callback(
+            t!(toggle_mod_key, locale = &locale),
+            format!("{}:settings:toggle_module:{}", self.key(), cid),
+        );
+
         let keyboard = InlineKeyboardMarkup::new(vec![
-            vec![standard_toggle_button(self.key(), s.enabled, cid)],
+            vec![toggle_mod_btn],
             vec![InlineKeyboardButton::callback(
-                "🤖 Настроить модели",
+                t!("modules.speech.btn_models", locale = &locale),
                 format!("{}:settings:menu:models:{}", self.key(), cid),
             )],
             vec![
-                toggle("Голосовые", s.enable_voice, "toggle_voice"),
-                toggle("Кружочки", s.enable_video_note, "toggle_video"),
+                toggle(
+                    t!("modules.speech.type_voice", locale = &locale).to_string(),
+                    s.enable_voice,
+                    "toggle_voice",
+                ),
+                toggle(
+                    t!("modules.speech.type_video", locale = &locale).to_string(),
+                    s.enable_video_note,
+                    "toggle_video",
+                ),
             ],
-            vec![toggle("Аудио файлы", s.enable_audio, "toggle_audio")],
-            vec![standard_back_button(owner, cid)],
+            vec![toggle(
+                t!("modules.speech.type_audio", locale = &locale).to_string(),
+                s.enable_audio,
+                "toggle_audio",
+            )],
+            vec![InlineKeyboardButton::callback(
+                t!("common.back", locale = &locale).to_string(),
+                format!("settings_back:{}:{}:{}", owner.r#type, owner.id, cid),
+            )],
         ]);
 
         Ok((text, keyboard))
@@ -195,48 +244,72 @@ impl SpeechRecognitionModule {
         cid: u64,
     ) -> Result<(String, InlineKeyboardMarkup), MyError> {
         let s: SpeechRecognitionSettings = Settings::get_module_settings(owner, self.key()).await?;
+        let config = Config::new().await;
+        let locale = get_locale_by_id(cid, &config).await;
         let models = [SpeechModel::Gemini25Flash, SpeechModel::Gemini25Pro];
 
+        let trans_lbl = t!("modules.speech.transcription", locale = &locale);
+        let sum_lbl = t!("modules.speech.summary", locale = &locale);
+
         let text = format!(
-            "🤖 <b>Настройка моделей</b>\n\n<b>Расшифровка:</b> {}\n<b>Пересказ/Итоги:</b> {}",
+            "{}\n\n<b>{}:</b> {}\n<b>{}:</b> {}",
+            t!("modules.speech.models_header", locale = &locale),
+            trans_lbl,
             s.transcription_model.display_name(),
+            sum_lbl,
             s.summary_model.display_name()
         );
 
         let mut rows = Vec::new();
 
         rows.push(vec![InlineKeyboardButton::callback(
-            "🎙 Модель для расшифровки",
+            t!("modules.speech.model_trans_header", locale = &locale),
             "noop",
         )]);
-        let trans_rows = create_radio_row(
-            &s.transcription_model,
-            &models,
-            &format!("{}:settings:set_trans_model", self.key()),
-            cid,
-            |m| m.display_name().to_string(),
-        );
-        for btn in trans_rows {
-            rows.push(vec![btn]);
+
+        for model in &models {
+            let is_selected = s.transcription_model == *model;
+            let label = if is_selected {
+                format!("• {} •", model.display_name())
+            } else {
+                model.display_name().to_string()
+            };
+            rows.push(vec![InlineKeyboardButton::callback(
+                label,
+                format!(
+                    "{}:settings:set_trans_model:{}:{}",
+                    self.key(),
+                    model.display_name(),
+                    cid
+                ),
+            )]);
         }
 
         rows.push(vec![InlineKeyboardButton::callback(
-            "📝 Модель для пересказа",
+            t!("modules.speech.model_sum_header", locale = &locale),
             "noop",
         )]);
-        let sum_rows = create_radio_row(
-            &s.summary_model,
-            &models,
-            &format!("{}:settings:set_sum_model", self.key()),
-            cid,
-            |m| m.display_name().to_string(),
-        );
-        for btn in sum_rows {
-            rows.push(vec![btn]);
+
+        for model in &models {
+            let is_selected = s.summary_model == *model;
+            let label = if is_selected {
+                format!("• {} •", model.display_name())
+            } else {
+                model.display_name().to_string()
+            };
+            rows.push(vec![InlineKeyboardButton::callback(
+                label,
+                format!(
+                    "{}:settings:set_sum_model:{}:{}",
+                    self.key(),
+                    model.display_name(),
+                    cid
+                ),
+            )]);
         }
 
         rows.push(vec![InlineKeyboardButton::callback(
-            "⬅️ Назад",
+            t!("common.back", locale = &locale),
             format!("{}:settings:menu:main:{}", self.key(), cid),
         )]);
 
