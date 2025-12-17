@@ -26,13 +26,16 @@ pub struct Settings {
     pub owner_type: String,
 
     #[serde(default)]
+    pub language: String,
+
+    #[serde(default)]
     pub modules: BTreeMap<String, Value>,
 }
 
 impl_skeleton!(Settings);
 
 impl Settings {
-    pub async fn create_with_defaults(owner: &Owner) -> Result<Self, MyError> {
+    pub async fn create_with_defaults(owner: &Owner, language: String) -> Result<Self, MyError> {
         let mut modules_map = BTreeMap::<String, Value>::new();
 
         for module in MOD_MANAGER.get_all_modules() {
@@ -53,6 +56,7 @@ impl Settings {
         let new_doc = Settings::new()
             .owner_id(owner.id.clone())
             .owner_type(owner.r#type.clone())
+            .language(language.clone())
             .modules(modules_map);
 
         new_doc.save().await?;
@@ -110,6 +114,6 @@ impl Settings {
             return Ok(doc);
         }
 
-        Self::create_with_defaults(owner).await
+        Self::create_with_defaults(owner, "en".to_string()).await
     }
 }

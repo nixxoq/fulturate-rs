@@ -5,16 +5,18 @@ use crate::{
         db::schemas::{settings::Settings, user::User},
     },
     errors::MyError,
+    util::i18n::{get_user_locale, normalize_lang_code},
 };
 use mongodb::bson::doc;
 use oximod::Model;
+use rust_i18n::t;
 use std::time::Instant;
 use sysinfo::System;
+use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup};
 use teloxide::{
     prelude::*,
     types::{ParseMode, ReplyParameters},
 };
-use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup};
 
 pub async fn start_handler(
     bot: Bot,
@@ -22,20 +24,43 @@ pub async fn start_handler(
     config: &Config,
     _arg: String,
 ) -> Result<(), MyError> {
+    let user_opt = message.from.as_ref();
     let mut is_new_user = false;
 
-    if message.chat.is_private()
-        && let Some(user) = message.from
-            && User::find_one(doc! { "user_id": &user.id.to_string() }).await?.is_none() {
+    if let Some(user) = user_opt {
+        println!("user lang: {:?}", &user.language_code);
+        let user_tg_lang = normalize_lang_code(user.language_code.as_deref());
+
+        if message.chat.is_private() {
+            if User::find_one(doc! { "user_id": &user.id.to_string() })
+                .await?
+                .is_none()
+            {
                 is_new_user = true;
-                User::new().user_id(user.id.to_string().clone()).save().await?;
+                User::new().user_id(user.id.to_string()).save().await?;
 
                 let owner = Owner {
                     id: user.id.to_string(),
                     r#type: "user".to_string(),
                 };
-                Settings::create_with_defaults(&owner).await?;
+
+                println!(
+                    "Creating default settings for new user {} (lang: {})",
+                    user.id, &user_tg_lang
+                );
+
+                Settings::create_with_defaults(&owner, user_tg_lang).await?;
             }
+        }
+    }
+
+    let locale = if let Some(user) = user_opt {
+        get_user_locale(user, config).await
+    } else {
+        "en".to_string()
+    };
+
+    println!("user locale: {}", &locale);
 
     let version = config.get_version();
 
@@ -50,33 +75,32 @@ pub async fn start_handler(
     let used_ram_mb = system_info.used_memory() / (1024 * 1024);
     let cpu_usage_percent = system_info.global_cpu_usage();
 
-    let welcome_part = if is_new_user {
-        "<b>Добро пожаловать!</b> 👋\n\n\
-            Я Fulturate — ваш многофункциональный ассистент. \
-            Чтобы посмотреть все возможности и настроить меня, используйте команду /settings.\n\n".to_string()
+    let welcome_key = if is_new_user {
+        "start.welcome_new"
     } else {
-        "<b>Fulturate тут!</b> ⚙️\n\n".to_string()
+        "start.welcome_back"
     };
+    let welcome_text = t!(welcome_key, locale = &locale);
 
-    let response_message = format!(
-        "{welcome_part}\
-        <b>Статус системы:</b>\n\
-        <pre>\
-        > Версия:      {}\n\
-        > Пинг API:    {} мс\n\
-        > Нагрузка ЦП: {:.2}%\n\
-        > ОЗУ:         {}/{} МБ\n\
-        </pre>",
-        version, api_ping, cpu_usage_percent, used_ram_mb, total_ram_mb
+    let status_text = t!(
+        "start.status",
+        locale = &locale,
+        version = version,
+        ping = api_ping,
+        cpu = format!("{:.2}", cpu_usage_percent),
+        ram_used = used_ram_mb,
+        ram_total = total_ram_mb
     );
 
-    let news_link_button =
-        InlineKeyboardButton::url("Канал с новостями", "https://t.me/fulturate".parse().unwrap());
+    let response_message = format!("{}{}", welcome_text, status_text);
+
+    let news_link_button = InlineKeyboardButton::url(
+        t!("start.btn_news", locale = &locale),
+        "https://t.me/fulturate".parse().unwrap(),
+    );
     let terms_of_use_link_button = InlineKeyboardButton::url(
-        "Условия использования",
-        "https://telegra.ph/Terms-Of-Use--Usloviya-ispolzovaniya-09-21"
-            .parse()
-            .unwrap(),
+        t!("start.btn_terms", locale = &locale),
+        "https://telegra.ph/Terms-Of-Use--Usloviya-ispolzovaniya-09-21".parse()?,
     );
 
     bot.send_message(message.chat.id, response_message)

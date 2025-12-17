@@ -4,6 +4,7 @@ use teloxide::types::User;
 
 pub mod currency_values;
 pub mod enums;
+pub mod i18n;
 pub mod paginator;
 
 pub const MAX_DURATION_SECONDS: u32 = 10 * 60;

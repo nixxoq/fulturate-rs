@@ -1,0 +1,116 @@
+{
+    "common": {
+        "yes": "Yes",
+        "no": "No",
+        "back": "⬅️ Back",
+        "delete": "🗑️ Delete",
+        "cancel": "Cancel",
+        "processing": "⏳ Processing..."
+    },
+    "errors": {
+        "user_not_found": "User not found",
+        "no_permission": "❌ You do not have permission for this action.",
+        "only_owner_delete": "❌ Only the chat owner can delete chat data.",
+        "only_author_delete": "❌ Only the message author or an admin can delete this.",
+        "module_disabled": "❌ Module is disabled.",
+        "cache_expired": "❌ Data has expired.",
+        "generic": "An error occurred.",
+        "button_expired": "❌ Button expired.",
+        "text_not_found_cache": "❌ Could not find text in cache."
+    },
+    "start": {
+        "welcome_new": "<b>Welcome!</b> 👋\n\nI am Fulturate — your multifunctional assistant. Use the /settings command to explore features and configure me.\n\n",
+        "welcome_back": "<b>Fulturate is here!</b> ⚙️\n\n",
+        "status": "<b>System Status:</b>\n<pre>\n> Version:     %{version}\n> API Ping:    %{ping} ms\n> CPU Usage:   %{cpu}%\n> RAM:         %{ram_used}/%{ram_total} MB\n</pre>",
+        "btn_news": "News Channel",
+        "btn_terms": "Terms of Use"
+    },
+    "chat": {
+        "bot_added_private": "<b>Welcome to Fulturate!</b> 👋\n\nI am ready to help with various tasks!\n\nHere is a short list of my features:\n- 📥 <b>Media Downloader</b>: from various sources.\n- 💱 <b>Currency Converter</b>: up-to-date rates at your fingertips.\n- 🤫 <b>Whisper System</b>: for more private communication.\n\nUse the /settings command to configure modules and learn more.",
+        "bot_added_group": "<b>Thanks for adding Fulturate to your chat!</b> 🎉\n\nI am a multifunctional bot ready to assist!\n\nFor full functionality, I need <b>admin rights</b>. This allows me to process commands and interact efficiently.\n\nOne of the admins can use the /settings command to configure my modules.",
+        "kicked": "Bot was kicked/banned. Data deleted for ID: %{id}"
+    },
+    "settings": {
+        "header": "⚙️ <b>Module Settings</b>\n\nClick a button to enable or disable the corresponding module.\n✅ – module enabled\n❌ – module disabled\n\n",
+        "module_status_on": "✅",
+        "module_status_off": "❌",
+        "btn_delete_data": "🗑️ Delete data from bot",
+        "delete_confirm_user": "Are you sure you want to delete all <b>your</b> data from the bot?\n\n<b>This action is irreversible!</b>",
+        "delete_confirm_group": "Are you sure you want to delete all data of this <b>chat</b> from the bot?\n\n<b>This action is irreversible!</b>",
+        "delete_success_user": "✅ All your data has been successfully deleted.",
+        "delete_success_group": "✅ All chat data has been successfully deleted.",
+        "delete_cancelled": "✅ Data deletion cancelled.",
+        "confirm_yes": "Yes, delete",
+        "confirm_no": "No, cancel",
+        "back_btn": "⬅️ Back",
+        "toggle_on": "Enable module",
+        "toggle_off": "Disable module"
+    },
+    "modules": {
+        "status_header": "⚙️ <b>Module Settings</b>: %{name}\n<blockquote>%{desc}</blockquote>\nStatus: %{status}",
+        "status_on": "✅ Enabled",
+        "status_off": "❌ Disabled",
+        "cobalt": {
+            "name": "Cobalt Downloader",
+            "desc": "Download media from popular platforms.",
+            "btn_quality_video": "Video Quality",
+            "btn_quality_audio": "Audio Quality",
+            "attr_on": "Attribution: On ✅",
+            "attr_off": "Attribution: Off ❌",
+            "error_too_long": "❌ Video is longer than %{minutes} minutes and cannot be processed.",
+            "processing": "⏳ Processing video...",
+            "uploading": "⏳ Uploading video..."
+        },
+        "currency": {
+            "name": "Currency Converter",
+            "desc": "Convert currencies and crypto with live rates.",
+            "select_header": "Select currencies to display.",
+            "removed": "Successfully removed %{code} from currency conversion.",
+            "added": "Successfully added %{code} from currency conversion."
+        },
+        "math": {
+            "name": "Math",
+            "desc": "Math expressions and plotting module.",
+            "help_title": "How to use Math?",
+            "help_text": "Type a simple expression (2+2) or a function with variable (sin(x)) to plot a graph."
+        },
+        "translate": {
+            "name": "Translate",
+            "desc": "Translation module.",
+            "help_title": "How to use inline translate?",
+            "help_text": "Just start typing the text you want to translate.",
+            "btn_switch_lang": "🏳️ Languages"
+        },
+        "whisper": {
+            "name": "Whisper System",
+            "desc": "Private messages within the chat.",
+            "help_title": "How to use whisper?",
+            "help_text": "Type your message, then specify recipients via @username or their Telegram ID at the end.",
+            "placeholder": "Whisper to whom?",
+            "not_for_you": "🤫 This is not for you.",
+            "btn_read": "👁️ Read",
+            "btn_forget": "🗑️ Forget",
+            "forgotten": "Whisper forgotten.",
+            "header_fmt": "🤫 %{sender} whispers to %{recipients}"
+        }
+    },
+    "inline": {
+        "not_registered_title": "Not Registered",
+        "not_registered_text": "To use the bot, please start a dialog with it first.",
+        "modules_disabled_title": "All modules disabled",
+        "modules_disabled_text": "Activate them in /settings.",
+        "btn_register": "▶️ Register"
+    },
+    "speech": {
+        "processing": "Processing audio...",
+        "btn_summarize": "✨ Summary",
+        "btn_retell": "📝 Retell",
+        "error_empty": "❌ Received empty text.",
+        "retry_btn": "🔁 Retry attempt",
+        "summary_wait": "✨ Summarizing...",
+        "retell_wait": "📝 Writing retelling..."
+    },
+    "misc": {
+        "action_irreversible": "This action is irreversible!"
+    }
+}
