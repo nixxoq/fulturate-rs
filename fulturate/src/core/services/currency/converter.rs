@@ -197,28 +197,6 @@ impl CurrencyDetector {
                     })
             })
             .collect()
-        // for mat in self.ac.find_iter(&text_lower) {
-        //     let code = &self.pattern_map[mat.pattern()];
-        //
-        //     let left_part = &text[..mat.start()];
-        //     if let Some(amount) = self.extract_number_end(left_part) {
-        //         results.push(DetectedCurrency {
-        //             amount,
-        //             currency_code: code.clone(),
-        //         });
-        //         continue;
-        //     }
-        //
-        //     let right_part = &text[mat.end()..];
-        //     if let Some(amount) = self.extract_number_start(right_part) {
-        //         results.push(DetectedCurrency {
-        //             amount,
-        //             currency_code: code.clone(),
-        //         });
-        //     }
-        // }
-        //
-        // results
     }
 
     fn extract_number_end(&self, text: &str) -> Option<f64> {
