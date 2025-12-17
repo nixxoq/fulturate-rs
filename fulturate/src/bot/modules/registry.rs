@@ -1,6 +1,7 @@
 use super::{
     Module, cobalt::CobaltModule, currency::CurrencyModule, math::MathModule,
-    translate::TranslateModule, whisper::WhisperModule,
+    speech_recognition::SpeechRecognitionModule, translate::TranslateModule,
+    whisper::WhisperModule,
 };
 use once_cell::sync::Lazy;
 use std::{collections::BTreeMap, sync::Arc};
@@ -22,7 +23,8 @@ impl ModuleManager {
             CurrencyModule,
             WhisperModule,
             TranslateModule,
-            MathModule
+            MathModule,
+            SpeechRecognitionModule,
         ];
 
         let modules = modules
