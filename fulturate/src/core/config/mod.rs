@@ -6,6 +6,7 @@ use crate::core::{
     services::currency::converter::{CurrencyConverter, OutputLanguage},
 };
 use dotenv::dotenv;
+use gem_rs::api::DEFAULT_BASE_URL;
 use log::error;
 use redis::Client as RedisClient;
 use std::sync::Arc;
@@ -26,6 +27,7 @@ pub struct Config {
     mongodb_url: String,
     redis_client: RedisCache,
     telegram_api: String,
+    gemini_base_url: String,
 }
 
 impl Config {
@@ -110,6 +112,9 @@ impl Config {
         };
         let redis_client = RedisCache::new(redis_client);
 
+        let gemini_base_url =
+            std::env::var("GEMINI_BASE_URL").unwrap_or(DEFAULT_BASE_URL.to_string());
+
         Config {
             bot,
             cobalt_client,
@@ -123,6 +128,7 @@ impl Config {
             mongodb_url,
             redis_client,
             telegram_api: telegram_api_url,
+            gemini_base_url,
         }
     }
 
@@ -173,5 +179,9 @@ impl Config {
 
     pub fn get_telegram_api(&self) -> &str {
         &self.telegram_api
+    }
+
+    pub fn get_gemini_base_url(&self) -> &str {
+        &self.gemini_base_url
     }
 }

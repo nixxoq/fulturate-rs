@@ -16,6 +16,7 @@ use teloxide::{
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub enum SpeechModel {
     Gemini25Flash,
+    Gemini30Flash,
     Gemini25Pro,
 }
 
@@ -23,6 +24,7 @@ impl SpeechModel {
     pub fn display_name(&self) -> &str {
         match self {
             Self::Gemini25Flash => "Gemini 2.5 Flash",
+            Self::Gemini30Flash => "Gemini 3 Flash",
             Self::Gemini25Pro => "Gemini 2.5 Pro",
         }
     }
@@ -31,12 +33,14 @@ impl SpeechModel {
         match self {
             Self::Gemini25Flash => "gemini-2.5-flash",
             Self::Gemini25Pro => "gemini-2.5-pro",
+            Self::Gemini30Flash => "gemini-3-flash",
         }
     }
 
     fn from_str(s: &str) -> Self {
         match s {
             "Gemini 2.5 Pro" => Self::Gemini25Pro,
+            "Gemini 3 Flash" => Self::Gemini30Flash,
             _ => Self::Gemini25Flash,
         }
     }
@@ -195,7 +199,7 @@ impl SpeechRecognitionModule {
         cid: u64,
     ) -> Result<(String, InlineKeyboardMarkup), MyError> {
         let s: SpeechRecognitionSettings = Settings::get_module_settings(owner, self.key()).await?;
-        let models = [SpeechModel::Gemini25Flash, SpeechModel::Gemini25Pro];
+        let models = [SpeechModel::Gemini25Flash, SpeechModel::Gemini25Pro, SpeechModel::Gemini30Flash];
 
         let text = format!(
             "🤖 <b>Настройка моделей</b>\n\n<b>Расшифровка:</b> {}\n<b>Пересказ/Итоги:</b> {}",
