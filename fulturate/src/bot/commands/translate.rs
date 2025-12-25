@@ -5,7 +5,11 @@ use crate::{
         services::translation::{SUPPORTED_LANGUAGES, normalize_language_code},
     },
     errors::MyError,
-    util::paginator::{FrameBuild, Paginator},
+    t,
+    util::{
+        i18n::get_chat_locale,
+        paginator::{FrameBuild, Paginator},
+    },
 };
 use futures::future::join_all;
 use serde::{Deserialize, Serialize};
@@ -67,16 +71,18 @@ pub async fn translate_handler(
     config: &Config,
     arg: String,
 ) -> Result<(), MyError> {
+    let locale = get_chat_locale(&msg.chat, config).await;
+
     let replied_to_message = match msg.reply_to_message() {
         Some(message) => message,
         None => {
             bot.send_message(
                 msg.chat.id,
-                "Нужно ответить на <b>то сообщение</b>, которое требуется перевести, чтобы использовать эту команду.",
+                t!("errors.reply_to_translate", locale = &locale),
             )
-                .reply_parameters(ReplyParameters::new(msg.id))
-                .parse_mode(ParseMode::Html)
-                .await?;
+            .reply_parameters(ReplyParameters::new(msg.id))
+            .parse_mode(ParseMode::Html)
+            .await?;
             return Ok(());
         }
     };
@@ -84,7 +90,7 @@ pub async fn translate_handler(
     let text_to_translate = match replied_to_message.text() {
         Some(text) => text,
         None => {
-            bot.send_message(msg.chat.id, "Отвечать нужно на сообщение <b>с текстом</b>.")
+            bot.send_message(msg.chat.id, t!("errors.reply_to_text", locale = &locale))
                 .reply_parameters(ReplyParameters::new(msg.id))
                 .parse_mode(ParseMode::Html)
                 .await?;
@@ -92,13 +98,18 @@ pub async fn translate_handler(
         }
     };
 
-    let user = msg.from.clone().unwrap();
-    if replied_to_message.clone().from.unwrap().is_bot {
-        bot.send_message(msg.chat.id, "Отвечать нужно на сообщение от пользователя.")
-            .reply_parameters(ReplyParameters::new(msg.id))
-            .parse_mode(ParseMode::Html)
-            .await?;
+    let Some(user) = msg.from.as_ref() else {
         return Ok(());
+    };
+
+    if let Some(author) = replied_to_message.from.as_ref() {
+        if author.is_bot {
+            bot.send_message(msg.chat.id, t!("errors.reply_to_user", locale = &locale))
+                .reply_parameters(ReplyParameters::new(msg.id))
+                .parse_mode(ParseMode::Html)
+                .await?;
+            return Ok(());
+        }
     }
 
     let target_lang: String;
@@ -124,7 +135,7 @@ pub async fn translate_handler(
                 .await?;
 
             let keyboard = create_language_keyboard(0, user.id.0);
-            bot.send_message(msg.chat.id, "Выберите язык для перевода:")
+            bot.send_message(msg.chat.id, t!("translate.select_lang", locale = &locale))
                 .reply_markup(keyboard)
                 .reply_parameters(ReplyParameters::new(replied_to_message.id))
                 .await?;
@@ -145,7 +156,7 @@ pub async fn translate_handler(
     let full_translated_text = translated_chunks.join("\n\n");
 
     if full_translated_text.is_empty() {
-        bot.send_message(msg.chat.id, "Не удалось перевести текст.")
+        bot.send_message(msg.chat.id, t!("translate.failed", locale = &locale))
             .await?;
         return Ok(());
     }

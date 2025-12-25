@@ -1,25 +1,36 @@
 use crate::{
     bot::modules::Owner,
-    core::db::schemas::{group::Group, settings::Settings, user::User},
+    core::{
+        config::Config,
+        db::schemas::{group::Group, settings::Settings, user::User},
+    },
     errors::MyError,
+    util::i18n::get_locale_by_id,
+    t,
 };
-use log::{info};
+use log::info;
 use mongodb::bson::doc;
 use oximod::ModelTrait;
 use teloxide::{
+    Bot,
     payloads::SendMessageSetters,
     prelude::Requester,
     types::{ChatMemberUpdated, InlineKeyboardButton, InlineKeyboardMarkup, ParseMode},
-    Bot,
 };
 
 pub async fn handle_bot_added(bot: Bot, update: ChatMemberUpdated) -> Result<(), MyError> {
     let id = update.chat.id.to_string();
+    let config = Config::new().await;
+    let locale = get_locale_by_id(update.from.id.0, &config).await;
 
     if update.new_chat_member.is_banned() || update.new_chat_member.is_left() {
         info!("Bot was kicked/banned. Deleting all data for ID: {}", &id);
 
-        let owner_type = if update.chat.is_private() { "user" } else { "group" };
+        let owner_type = if update.chat.is_private() {
+            "user"
+        } else {
+            "group"
+        };
 
         if owner_type == "user" {
             User::delete(doc! { "user_id": &id }).await.ok();
@@ -37,29 +48,18 @@ pub async fn handle_bot_added(bot: Bot, update: ChatMemberUpdated) -> Result<(),
     info!("Bot added to chat. ID: {}", &id);
 
     let welcome_text = if update.chat.is_private() {
-        "<b>Добро пожаловать в Fulturate!</b> 👋\n\n\
-            Я готов помочь с различными задачами!\n\n\
-            Вот краткий список моих возможностей:\n\
-            - 📥 <b>Скачивание медиа</b>: из различных источников.\n\
-            - 💱 <b>Конвертация валют</b>: актуальные курсы всегда под рукой.\n\
-            - 🤫 <b>Система «шепота»</b>: для более приватного общения.\n\n\
-            Чтобы настроить модули под себя и узнать больше, используйте команду /settings."
-            .to_string()
+        t!("chat.bot_added_private", locale = &locale)
     } else {
-        "<b>Спасибо, что добавили Fulturate в ваш чат!</b> 🎉\n\n\
-            Я многофункциональный бот, готовый помогать вашему чату!\n\n\
-            Для полноценной работы мне необходимы <b>права администратора</b>. \
-            Это позволит мне обрабатывать команды и эффективно взаимодействовать с участниками.\n\n\
-            Чтобы настроить мои модули и возможности, один из администраторов чата может использовать команду /settings."
-            .to_string()
+        t!("chat.bot_added_group", locale = &locale)
     };
 
-    let news_link_button =
-        InlineKeyboardButton::url("Канал с новостями", "https://t.me/fulturate".parse().unwrap());
+    let news_link_button = InlineKeyboardButton::url(
+        t!("start.btn_news", locale = &locale),
+        "https://t.me/fulturate".parse()?,
+    );
     let terms_of_use_link_button = InlineKeyboardButton::url(
-        "Условия использования",
-        "https://telegra.ph/Terms-Of-Use--Usloviya-ispolzovaniya-09-21"
-            .parse()?,
+        t!("start.btn_terms", locale = &locale),
+        "https://telegra.ph/Terms-Of-Use--Usloviya-ispolzovaniya-09-21".parse()?,
     );
 
     bot.send_message(update.chat.id, welcome_text)

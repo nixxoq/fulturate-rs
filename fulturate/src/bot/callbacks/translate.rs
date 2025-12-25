@@ -9,9 +9,11 @@ use crate::{
     },
     errors::MyError,
     util::{
+        i18n::get_locale_by_id,
         is_author,
         paginator::{FrameBuild, Paginator},
     },
+    t,
 };
 use futures::future::join_all;
 use log::info;
@@ -32,6 +34,8 @@ pub async fn handle_translate_callback(
     q: CallbackQuery,
     config: &Config,
 ) -> Result<(), MyError> {
+    let locale = get_locale_by_id(q.from.id.0, &config).await;
+
     if let (Some(data), Some(MaybeInaccessibleMessage::Regular(message))) = (&q.data, &q.message) {
         if let Some(author_id) = data
             .rsplit_once(":")
@@ -39,7 +43,7 @@ pub async fn handle_translate_callback(
             && !is_author(&q.from, author_id)
         {
             bot.answer_callback_query(q.id)
-                .text("❌ у вас нет прав использовать эту кнопку!")
+                .text(t!("errors.no_permission", locale = &locale))
                 .show_alert(true)
                 .await?;
 
@@ -54,16 +58,23 @@ pub async fn handle_translate_callback(
                 info!("parts: {:#?}", parts);
                 let translation_id = parts[0];
                 if let Ok(page) = parts[1].parse::<usize>() {
-                    handle_translation_pagination(&bot, message, translation_id, page, config)
-                        .await?;
+                    handle_translation_pagination(
+                        &bot,
+                        message,
+                        translation_id,
+                        page,
+                        config,
+                        &locale,
+                    )
+                    .await?;
                 }
             }
         } else if data.starts_with("tr_page:") {
             handle_language_menu_pagination(bot, message, data).await?;
         } else if data.starts_with("tr_lang:") {
-            handle_language_selection(bot, message, data, q.from.clone(), config).await?;
+            handle_language_selection(bot, message, data, q.from.clone(), config, &locale).await?;
         } else if data.starts_with("tr_show_langs") {
-            handle_show_languages(&bot, message, &q.from, config).await?;
+            handle_show_languages(&bot, message, &q.from, config, &locale).await?;
         }
     } else {
         bot.answer_callback_query(q.id).await?;
@@ -77,6 +88,7 @@ async fn handle_translation_pagination(
     translation_id: &str,
     page: usize,
     config: &Config,
+    locale: &str,
 ) -> Result<(), MyError> {
     let redis_key = format!("translation:{}", translation_id);
     let cache: Option<TranslationCache> = config.get_redis_client().get(&redis_key).await?;
@@ -115,7 +127,7 @@ async fn handle_translation_pagination(
         bot.edit_message_text(
             message.chat.id,
             message.id,
-            "Срок действия кеша перевода истек. Пожалуйста, переведите заново.",
+            t!("translate.cache_expired", locale = locale),
         )
         .reply_markup(InlineKeyboardMarkup::new(vec![vec![]]))
         .await?;
@@ -154,10 +166,12 @@ async fn handle_language_selection(
     data: &str,
     user: User,
     config: &Config,
+    locale: &str,
 ) -> Result<(), MyError> {
     let Some(target_lang) = data
         .trim_start_matches("tr_lang:")
-        .rsplit_once(":").map(|(lang, _)| lang)
+        .rsplit_once(":")
+        .map(|(lang, _)| lang)
     else {
         return Ok(());
     };
@@ -171,7 +185,7 @@ async fn handle_language_selection(
         bot.edit_message_text(
             message.chat.id,
             message.id,
-            "Задача на перевод устарела. Пожалуйста, запросите перевод снова.",
+            t!("translate.job_expired", locale = locale),
         )
         .await?;
         return Ok(());
@@ -200,7 +214,7 @@ async fn handle_language_selection(
         bot.edit_message_text(
             message.chat.id,
             message.id,
-            "Не удалось перевести текст. Возможно, API временно недоступен.",
+            t!("translate.failed", locale = locale),
         )
         .await?;
         return Ok(());
@@ -268,6 +282,7 @@ async fn handle_show_languages(
     message: &Message,
     user: &User,
     config: &Config,
+    locale: &str,
 ) -> Result<(), MyError> {
     if let Some(original_message) = message.reply_to_message() {
         if let Some(text) = original_message
@@ -288,7 +303,7 @@ async fn handle_show_languages(
         bot.edit_message_text(
             message.chat.id,
             message.id,
-            "Не удалось найти исходное сообщение для смены языка.",
+            t!("translate.no_source_msg", locale = locale),
         )
         .await?;
         return Ok(());
@@ -298,7 +313,7 @@ async fn handle_show_languages(
     bot.edit_message_text(
         message.chat.id,
         message.id,
-        "Выберите новый язык для перевода:",
+        t!("translate.select_lang", locale = locale),
     )
     .reply_markup(keyboard)
     .await?;

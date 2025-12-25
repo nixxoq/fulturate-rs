@@ -8,7 +8,8 @@ use crate::{
     },
     core::{config::Config, db::schemas::settings::Settings as DbSettings},
     errors::MyError,
-    util::{enums::AudioStruct, split_text},
+    t,
+    util::{enums::AudioStruct, i18n::get_chat_locale, split_text},
 };
 use bytes::Bytes;
 use gem_rs::{
@@ -53,6 +54,7 @@ pub async fn pagination_handler(
     let Some(data) = query.data.as_ref() else {
         return Ok(());
     };
+    let locale = get_chat_locale(&message.chat, &config).await;
 
     let parts: Vec<&str> = data.split(':').collect();
     if parts.len() != 3 || parts[1] != "page" {
@@ -72,8 +74,12 @@ pub async fn pagination_handler(
     let message_cache_key = format!("message_file_map:{}", message.id);
     let Some(file_unique_id): Option<String> = cache.get::<String>(&message_cache_key).await?
     else {
-        bot.edit_message_text(message.chat.id, message.id, "❌ Кнопка устарела.")
-            .await?;
+        bot.edit_message_text(
+            message.chat.id,
+            message.id,
+            t!("errors.button_expired", locale = &locale),
+        )
+        .await?;
         return Ok(());
     };
 
@@ -82,7 +88,7 @@ pub async fn pagination_handler(
         bot.edit_message_text(
             message.chat.id,
             message.id,
-            "❌ Не удалось найти текст в кеше.",
+            t!("errors.text_not_found_cache", locale = &locale),
         )
         .await?;
         return Ok(());
@@ -91,7 +97,7 @@ pub async fn pagination_handler(
     let full_text_source = if mode == "summary" {
         cache_entry
             .summary
-            .unwrap_or_else(|| "Ошибка: краткое содержание не найдено.".to_string())
+            .unwrap_or_else(|| "Error: Summary not found.".to_string())
     } else {
         cache_entry.full_text
     };
@@ -114,9 +120,9 @@ pub async fn pagination_handler(
     };
 
     let new_keyboard = if mode == "summary" {
-        create_summary_pagination_keyboard(page, text_parts.len())
+        create_summary_pagination_keyboard(page, text_parts.len(), &locale)
     } else {
-        create_transcription_keyboard(page, text_parts.len(), query.from.id.0)
+        create_transcription_keyboard(page, text_parts.len(), query.from.id.0, &locale)
     };
 
     if message.text() != Some(&formatted_text) || message.reply_markup() != Some(&new_keyboard) {
@@ -133,6 +139,7 @@ pub async fn back_handler(bot: Bot, query: CallbackQuery, config: &Config) -> Re
     let Some(message) = query.message.and_then(|m| m.regular_message().cloned()) else {
         return Ok(());
     };
+    let locale = get_chat_locale(&message.chat, config).await;
 
     let cache = config.get_redis_client();
     let message_cache_key = format!("message_file_map:{}", message.id);
@@ -140,7 +147,7 @@ pub async fn back_handler(bot: Bot, query: CallbackQuery, config: &Config) -> Re
         bot.edit_message_text(
             message.chat.id,
             message.id,
-            "❌ Не удалось найти исходное сообщение.",
+            t!("speech.audio_not_found", locale = &locale),
         )
         .await?;
         return Ok(());
@@ -153,14 +160,14 @@ pub async fn back_handler(bot: Bot, query: CallbackQuery, config: &Config) -> Re
         bot.edit_message_text(
             message.chat.id,
             message.id,
-            "❌ Не удалось найти текст в кеше.",
+            t!("errors.text_not_found_cache", locale = &locale),
         )
         .await?;
         return Ok(());
     };
 
     let text_parts = split_text(&cache_entry.full_text, 4000);
-    let keyboard = create_transcription_keyboard(0, text_parts.len(), query.from.id.0);
+    let keyboard = create_transcription_keyboard(0, text_parts.len(), query.from.id.0, &locale);
 
     bot.edit_message_text(
         message.chat.id,
@@ -185,6 +192,7 @@ pub async fn summarization_handler(
     let Some(message) = query.message.and_then(|m| m.regular_message().cloned()) else {
         return Ok(());
     };
+    let locale = get_chat_locale(&message.chat, config).await;
 
     let owner = Owner {
         id: message.chat.id.to_string(),
@@ -202,7 +210,7 @@ pub async fn summarization_handler(
 
     let Some(audio_message_id) = message.reply_to_message().map(|m| m.id.0) else {
         bot.answer_callback_query(query.id)
-            .text("❌ Не удалось найти исходное сообщение для повторной попытки.")
+            .text(t!("speech.audio_not_found", locale = &locale))
             .show_alert(true)
             .await?;
         return Ok(());
@@ -211,8 +219,12 @@ pub async fn summarization_handler(
     let cache = config.get_redis_client();
     let message_file_map_key = format!("message_file_map:{}", message.id);
     let Some(file_unique_id) = cache.get::<String>(&message_file_map_key).await? else {
-        bot.edit_message_text(message.chat.id, message.id, "❌ Кнопка устарела.")
-            .await?;
+        bot.edit_message_text(
+            message.chat.id,
+            message.id,
+            t!("errors.button_expired", locale = &locale),
+        )
+        .await?;
         return Ok(());
     };
 
@@ -223,7 +235,7 @@ pub async fn summarization_handler(
             bot.edit_message_text(
                 message.chat.id,
                 message.id,
-                "❌ Не удалось найти исходное аудио.",
+                t!("speech.audio_not_found", locale = &locale),
             )
             .await?;
             return Ok(());
@@ -243,7 +255,7 @@ pub async fn summarization_handler(
             icon,
             html::escape(&text_parts[0])
         );
-        let keyboard = create_summary_pagination_keyboard(0, text_parts.len());
+        let keyboard = create_summary_pagination_keyboard(0, text_parts.len(), &locale);
 
         bot.edit_message_text(message.chat.id, message.id, final_text)
             .parse_mode(ParseMode::Html)
@@ -258,18 +270,18 @@ pub async fn summarization_handler(
         bot.edit_message_text(
             message.chat.id,
             message.id,
-            "❌ Нельзя составить краткое содержание из аудио без речи.",
+            t!("speech.no_speech", locale = &locale),
         )
         .parse_mode(ParseMode::Html)
-        .reply_markup(create_summary_keyboard())
+        .reply_markup(create_summary_keyboard(&locale))
         .await?;
         return Ok(());
     }
 
     let waiting_text = if action_type == "retell" {
-        "📝 Пишу краткий пересказ..."
+        t!("speech.retell_wait", locale = &locale)
     } else {
-        "✨ Подвожу итоги..."
+        t!("speech.summary_wait", locale = &locale)
     };
 
     bot.edit_message_text(message.chat.id, message.id, waiting_text)
@@ -313,7 +325,7 @@ pub async fn summarization_handler(
                 icon,
                 html::escape(&text_parts[0])
             );
-            let keyboard = create_summary_pagination_keyboard(0, text_parts.len());
+            let keyboard = create_summary_pagination_keyboard(0, text_parts.len(), &locale);
 
             bot.edit_message_text(message.chat.id, message.id, final_text)
                 .parse_mode(ParseMode::Html)
@@ -321,9 +333,9 @@ pub async fn summarization_handler(
                 .await?;
         }
         _ => {
-            let error_text = "❌ Не удалось составить краткое содержание.";
+            let error_text = t!("speech.failed_summary", locale = &locale);
             let retry_keyboard =
-                create_retry_keyboard(audio_message_id, action_type, cache_entry.attempt);
+                create_retry_keyboard(audio_message_id, action_type, cache_entry.attempt, &locale);
 
             bot.edit_message_text(message.chat.id, message.id, error_text)
                 .reply_markup(retry_keyboard)
@@ -340,6 +352,7 @@ async fn get_cached(
     config: &Config,
     force_no_cache: bool,
     model: String,
+    locale: &str,
 ) -> Result<TranscriptionCache, MyError> {
     let cache = config.get_redis_client();
     let file_cache_key = format!("transcription_by_file:{}", &file.file_unique_id);
@@ -359,10 +372,9 @@ async fn get_cached(
         config: config.clone(),
         custom_model: model,
     };
-    let processed_parts = transcription.to_text().await;
 
-    if processed_parts.is_empty() || processed_parts[0].contains("Не удалось преобразовать")
-    {
+    let processed_parts = transcription.to_text(locale).await;
+    if processed_parts.is_empty() || processed_parts[0].contains("❌") {
         let error_message = processed_parts.first().cloned().unwrap_or_default();
         return Err(MyError::Other(error_message));
     }
@@ -390,6 +402,8 @@ pub async fn transcription_handler(
     msg: &Message,
     config: &Config,
 ) -> Result<(), MyError> {
+    let locale = get_chat_locale(&msg.chat, config).await;
+
     let owner = Owner {
         id: msg.chat.id.to_string(),
         r#type: if msg.chat.is_private() {
@@ -422,7 +436,7 @@ pub async fn transcription_handler(
     }
 
     let message = bot
-        .send_message(msg.chat.id, "Обрабатываю аудио...")
+        .send_message(msg.chat.id, t!("speech.processing", locale = &locale))
         .reply_parameters(ReplyParameters::new(msg.id))
         .parse_mode(ParseMode::Html)
         .await
@@ -455,14 +469,15 @@ pub async fn transcription_handler(
 
         let model_key = settings.transcription_model.api_key().to_string();
 
-        match get_cached(&bot, &file, config, false, model_key).await {
+        match get_cached(&bot, &file, config, false, model_key, &locale).await {
             Ok(cache_entry) => {
                 let text_parts = split_text(&cache_entry.full_text, 4000);
                 if text_parts.is_empty() {
                     return Ok(());
                 }
 
-                let keyboard = create_transcription_keyboard(0, text_parts.len(), user.id.0);
+                let keyboard =
+                    create_transcription_keyboard(0, text_parts.len(), user.id.0, &locale);
                 bot.edit_message_text(
                     msg.chat.id,
                     message.id,
@@ -477,16 +492,20 @@ pub async fn transcription_handler(
             }
             Err(e) => {
                 error!("Failed to get transcription: {:?}", e);
-                let error_text = "❌ Произошла ошибка при обработке аудио.".to_string();
-                let retry_keyboard = create_retry_keyboard(msg.id.0, "transcribe", 0);
+                let error_text = t!("speech.error_processing", locale = &locale);
+                let retry_keyboard = create_retry_keyboard(msg.id.0, "transcribe", 0, &locale);
                 bot.edit_message_text(message.chat.id, message.id, error_text)
                     .reply_markup(retry_keyboard)
                     .await?;
             }
         }
     } else {
-        bot.edit_message_text(message.chat.id, message.id, "❌ Не удалось найти аудио.")
-            .await?;
+        bot.edit_message_text(
+            message.chat.id,
+            message.id,
+            t!("speech.audio_not_found", locale = &locale),
+        )
+        .await?;
     }
     Ok(())
 }
@@ -506,12 +525,17 @@ pub async fn retry_speech_handler(
     else {
         return Ok(());
     };
+    let locale = get_chat_locale(&message.chat, config).await;
 
     bot.answer_callback_query(query.clone().id).await?;
 
     if attempt >= 1 {
-        bot.edit_message_text(message.chat.id, message.id, "❌ Лимит попыток исчерпан.")
-            .await?;
+        bot.edit_message_text(
+            message.chat.id,
+            message.id,
+            t!("speech.limit_exceeded", locale = &locale),
+        )
+        .await?;
         return Ok(());
     }
 
@@ -545,7 +569,7 @@ pub async fn retry_speech_handler(
         bot.edit_message_text(
             message.chat.id,
             message.id,
-            "🔁 Повторная обработка аудио...",
+            t!("speech.re_processing", locale = &locale),
         )
         .await?;
 
@@ -568,12 +592,14 @@ pub async fn retry_speech_handler(
             config,
             true,
             settings.transcription_model.api_key().to_string(),
+            &locale,
         )
         .await
         {
             Ok(cache_entry) => {
                 let text_parts = split_text(&cache_entry.full_text, 4000);
-                let keyboard = create_transcription_keyboard(0, text_parts.len(), query.from.id.0);
+                let keyboard =
+                    create_transcription_keyboard(0, text_parts.len(), query.from.id.0, &locale);
                 bot.edit_message_text(
                     message.chat.id,
                     message.id,
@@ -587,18 +613,26 @@ pub async fn retry_speech_handler(
                 .await?;
             }
             Err(_) => {
-                let retry_keyboard =
-                    create_retry_keyboard(replied_to_audio_message_id, "transcribe", new_attempt);
-                bot.edit_message_text(message.chat.id, message.id, "❌ Ошибка при повторе.")
-                    .reply_markup(retry_keyboard)
-                    .await?;
+                let retry_keyboard = create_retry_keyboard(
+                    replied_to_audio_message_id,
+                    "transcribe",
+                    new_attempt,
+                    &locale,
+                );
+                bot.edit_message_text(
+                    message.chat.id,
+                    message.id,
+                    t!("speech.error_retry", locale = &locale),
+                )
+                .reply_markup(retry_keyboard)
+                .await?;
             }
         }
     } else {
         let waiting_text = if action_type == "retell" {
-            "🔁 Повторный пересказ..."
+            t!("speech.re_retell_wait", locale = &locale)
         } else {
-            "🔁 Повторные итоги..."
+            t!("speech.re_summary_wait", locale = &locale)
         };
         bot.edit_message_text(message.chat.id, message.id, waiting_text)
             .await?;
@@ -606,8 +640,12 @@ pub async fn retry_speech_handler(
         let mut cache_entry = match cache.get::<TranscriptionCache>(&file_cache_key).await? {
             Some(entry) => entry,
             None => {
-                bot.edit_message_text(message.chat.id, message.id, "❌ Исходное аудио не найдено.")
-                    .await?;
+                bot.edit_message_text(
+                    message.chat.id,
+                    message.id,
+                    t!("speech.audio_not_found", locale = &locale),
+                )
+                .await?;
                 return Ok(());
             }
         };
@@ -648,7 +686,7 @@ pub async fn retry_speech_handler(
                     icon,
                     html::escape(&text_parts[0])
                 );
-                let keyboard = create_summary_pagination_keyboard(0, text_parts.len());
+                let keyboard = create_summary_pagination_keyboard(0, text_parts.len(), &locale);
                 bot.edit_message_text(message.chat.id, message.id, final_text)
                     .parse_mode(ParseMode::Html)
                     .reply_markup(keyboard)
@@ -660,10 +698,15 @@ pub async fn retry_speech_handler(
                     replied_to_audio_message_id,
                     action_type,
                     cache_entry.attempt,
+                    &locale,
                 );
-                bot.edit_message_text(message.chat.id, message.id, "❌ Не удалось.")
-                    .reply_markup(retry_keyboard)
-                    .await?;
+                bot.edit_message_text(
+                    message.chat.id,
+                    message.id,
+                    t!("speech.failed_summary", locale = &locale),
+                )
+                .reply_markup(retry_keyboard)
+                .await?;
                 cache.set(&file_cache_key, &cache_entry, 86400).await?;
             }
         }
@@ -695,14 +738,14 @@ pub async fn summarize_audio(
             "audio_summary",
             data.to_vec(),
             &mime_type,
-            Some(std::time::Duration::from_secs(180)),
+            Some(Duration::from_secs(180)),
         )
         .await
         .map_err(|e| MyError::from(e))?;
 
     let mut client = GemSession::Builder()
         .model(Models::Custom(model))
-        .timeout(Some(std::time::Duration::from_secs(120)))
+        .timeout(Some(Duration::from_secs(120)))
         .build();
 
     let response = client
@@ -783,11 +826,11 @@ pub async fn save_file_to_memory(
 }
 
 impl Transcription {
-    pub async fn to_text(&self) -> Vec<String> {
+    pub async fn to_text(&self, locale: &str) -> Vec<String> {
         let mut settings = Settings::new();
         settings.set_all_safety_settings(HarmBlockThreshold::BlockNone);
 
-        let error_answer = "❌ Не удалось преобразовать текст из сообщения.".to_string();
+        let error_answer = t!("speech.error_transcription", locale = locale);
         // let ai_model = self.config.get_json_config().get_ai_model().to_owned();
         let prompt = self.config.get_json_config().get_ai_prompt().to_owned();
         settings.set_system_instruction(&prompt);
@@ -844,6 +887,6 @@ impl Transcription {
                 }
             }
         }
-        vec![error_answer + "\n\n" + &last_error]
+        vec![error_answer.to_string() + "\n\n" + &last_error]
     }
 }

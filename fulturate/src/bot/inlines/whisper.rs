@@ -1,4 +1,10 @@
-use crate::{core::config::Config, errors::MyError};
+use crate::{
+    bot::modules::{Owner, whisper::WhisperSettings},
+    core::{config::Config, db::schemas::settings::Settings},
+    errors::MyError,
+    t,
+    util::i18n::get_user_locale,
+};
 use log::error;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -16,9 +22,6 @@ use teloxide::{
     utils::html,
 };
 use uuid::Uuid;
-use crate::bot::modules::Owner;
-use crate::bot::modules::whisper::WhisperSettings;
-use crate::core::db::schemas::settings::Settings;
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct Recipient {
@@ -97,15 +100,18 @@ pub async fn handle_whisper_inline(
     q: InlineQuery,
     config: Arc<Config>,
 ) -> Result<(), MyError> {
+    let locale = get_user_locale(&q.from, &config).await;
+
     if q.query.is_empty() {
         let article = InlineQueryResultArticle::new(
             "whisper_help",
-            "Как использовать шепот?",
-            InputMessageContent::Text(InputMessageContentText::new(
-                "Начните вводить сообщение, а в конце укажите получателей через @username или их Telegram ID.",
-            )),
+            t!("modules.whisper.help_title", locale = &locale),
+            InputMessageContent::Text(InputMessageContentText::new(t!(
+                "modules.whisper.help_text",
+                locale = &locale
+            ))),
         )
-            .description("Пример: Привет! @username 123456789");
+        .description(t!("modules.whisper.help_desc", locale = &locale));
 
         bot.answer_inline_query(q.id, vec![InlineQueryResult::Article(article)])
             .cache_time(5)
@@ -137,20 +143,29 @@ pub async fn handle_whisper_inline(
 
                 let keyboard = InlineKeyboardMarkup::new(vec![vec![
                     InlineKeyboardButton::switch_inline_query_current_chat(
-                        format!("Выбрать {}", person.first_name),
+                        t!(
+                            "modules.whisper.recent_btn",
+                            locale = &locale,
+                            name = &person.first_name
+                        ),
                         format!("{} {} ", q.query.trim(), query_filler),
                     ),
                 ]]);
 
                 let article = InlineQueryResultArticle::new(
                     format!("recent_{}", generate_recipient_hash(&person)),
-                    format!("✍️ Написать {}", person.first_name),
-                    InputMessageContent::Text(InputMessageContentText::new(format!(
-                        "Нажмите кнопку ниже, чтобы начать шепот для {}",
-                        person.first_name
+                    t!(
+                        "modules.whisper.recent_title",
+                        locale = &locale,
+                        name = &person.first_name
+                    ),
+                    InputMessageContent::Text(InputMessageContentText::new(t!(
+                        "modules.whisper.recent_text",
+                        locale = &locale,
+                        name = &person.first_name
                     ))),
                 )
-                .description("Нажмите кнопку ниже, чтобы выбрать этого пользователя")
+                .description(t!("modules.whisper.recent_desc", locale = &locale))
                 .reply_markup(keyboard);
                 results.push(InlineQueryResult::Article(article));
             }
@@ -158,12 +173,13 @@ pub async fn handle_whisper_inline(
 
         let article = InlineQueryResultArticle::new(
             "whisper_no_recipients",
-            "Кому шептать?",
-            InputMessageContent::Text(InputMessageContentText::new(
-                "Укажите получателей, добавив их юзернеймы (@username) или ID в конце сообщения.",
-            )),
+            t!("modules.whisper.placeholder", locale = &locale),
+            InputMessageContent::Text(InputMessageContentText::new(t!(
+                "modules.whisper.no_recipients_text",
+                locale = &locale
+            ))),
         )
-        .description("Вы не указали получателя.");
+        .description(t!("modules.whisper.no_recipients_desc", locale = &locale));
         results.push(InlineQueryResult::Article(article));
 
         bot.answer_inline_query(q.id, results)
@@ -223,8 +239,14 @@ pub async fn handle_whisper_inline(
         .await?;
 
     let keyboard = InlineKeyboardMarkup::new(vec![vec![
-        InlineKeyboardButton::callback("👁️ Прочитать", format!("whisper_read_{}", whisper_id)),
-        InlineKeyboardButton::callback("🗑️ Забыть", format!("whisper_forget_{}", whisper_id)),
+        InlineKeyboardButton::callback(
+            t!("modules.whisper.btn_read", locale = &locale),
+            format!("whisper_read_{}", whisper_id),
+        ),
+        InlineKeyboardButton::callback(
+            t!("modules.whisper.btn_forget", locale = &locale),
+            format!("whisper_forget_{}", whisper_id),
+        ),
     ]]);
 
     let recipients_str = whisper
@@ -241,19 +263,25 @@ pub async fn handle_whisper_inline(
         .collect::<Vec<_>>()
         .join(", ");
 
-    let message_text = format!(
-        "🤫 {} шепчет для {}",
-        whisper.sender_first_name, recipients_str
+    let message_text = t!(
+        "modules.whisper.header_fmt",
+        locale = &locale,
+        sender = whisper.sender_first_name,
+        recipients = recipients_str
     );
 
     let article = InlineQueryResultArticle::new(
         whisper_id,
-        "Нажмите, чтобы отправить шепот",
+        t!("modules.whisper.send_btn", locale = &locale),
         InputMessageContent::Text(
             InputMessageContentText::new(message_text).parse_mode(ParseMode::Html),
         ),
     )
-    .description(format!("Сообщение: {}", content))
+    .description(t!(
+        "modules.whisper.send_desc",
+        locale = &locale,
+        msg = content
+    ))
     .reply_markup(keyboard);
 
     if let Err(e) = bot
@@ -273,6 +301,8 @@ pub async fn is_whisper_query(q: InlineQuery) -> bool {
         r#type: "user".to_string(),
     };
 
-    let settings = Settings::get_module_settings::<WhisperSettings>(&owner, "whisper").await.unwrap();
+    let settings = Settings::get_module_settings::<WhisperSettings>(&owner, "whisper")
+        .await
+        .unwrap();
     settings.enabled
 }

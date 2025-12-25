@@ -6,9 +6,9 @@ use crate::{
         services::cobalt::{AudioQuality, VideoQuality},
     },
     errors::MyError,
-    util::i18n::get_locale_by_id,
+    util::i18n::get_locale_by_owner,
+    t,
 };
-use rust_i18n::t;
 use serde::{Deserialize, Serialize};
 use teloxide::{
     prelude::*,
@@ -52,7 +52,7 @@ module! {
         ) -> Result<(String, InlineKeyboardMarkup), MyError> {
             let s: CobaltSettings = Settings::get_module_settings(owner, self.key()).await?;
                         let config = Config::new().await;
-            let locale = get_locale_by_id(cid, &config).await;
+            let locale = get_locale_by_owner(&owner.id, &owner.r#type, &config).await;
 
             // let text = standard_settings_header(self.name(), self.description(), s.enabled);
             let module_name = t!("modules.cobalt.name", locale = &locale);

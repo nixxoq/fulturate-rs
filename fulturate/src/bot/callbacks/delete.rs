@@ -9,7 +9,8 @@ use crate::{
         services::speech_recognition::back_handler,
     },
     errors::MyError,
-    util::is_admin_or_author,
+    util::{i18n::get_locale_by_id, is_admin_or_author},
+    t,
 };
 use log::error;
 use mongodb::bson::doc;
@@ -44,16 +45,21 @@ async fn has_data_delete_permission(
     false
 }
 
-pub async fn handle_delete_data(bot: Bot, query: CallbackQuery) -> Result<(), MyError> {
+pub async fn handle_delete_data(
+    bot: Bot,
+    query: CallbackQuery,
+    config: &Config,
+) -> Result<(), MyError> {
     let Some(message) = query.message.as_ref() else {
         return Ok(());
     };
+    let locale = get_locale_by_id(query.from.id.0, &config).await;
 
     let can_delete = has_data_delete_permission(&bot, message.chat(), &query.from).await;
 
     if !can_delete {
         bot.answer_callback_query(query.id)
-            .text("❌ Удалить данные чата может только его владелец.")
+            .text(t!("errors.only_owner_delete", locale = &locale))
             .show_alert(true)
             .await?;
         return Ok(());
@@ -63,23 +69,23 @@ pub async fn handle_delete_data(bot: Bot, query: CallbackQuery) -> Result<(), My
         (
             "user",
             query.from.id.to_string(),
-            "Вы уверены, что хотите удалить все <b>ваши</b> данные из бота?\n\n<b>Это действие необратимо!</b>",
+            t!("settings.delete_confirm_user", locale = &locale),
         )
     } else {
         (
             "group",
             message.chat().id.to_string(),
-            "Вы уверены, что хотите удалить все данные этого <b>чата</b> из бота?\n\n<b>Это действие необратимо!</b>",
+            t!("settings.delete_confirm_group", locale = &locale),
         )
     };
 
     let keyboard = InlineKeyboardMarkup::new(vec![vec![
         InlineKeyboardButton::callback(
-            "Да, удалить",
+            t!("settings.confirm_yes", locale = &locale),
             format!("delete_data_confirm:{}:{}:yes", owner_type, owner_id),
         ),
         InlineKeyboardButton::callback(
-            "Нет, отмена",
+            t!("settings.confirm_no", locale = &locale),
             format!("delete_data_confirm:{}:{}:no", owner_type, owner_id),
         ),
     ]]);
@@ -104,6 +110,7 @@ pub async fn handle_delete_request(
     let Some(data) = query.data.as_ref() else {
         return Ok(());
     };
+    let locale = get_locale_by_id(query.from.id.0, &config).await;
 
     let payload = data.strip_prefix("delete_msg:").unwrap_or_default();
     let parts: Vec<&str> = payload.split(':').collect();
@@ -114,7 +121,7 @@ pub async fn handle_delete_request(
 
     let Ok(target_user_id) = parts[0].parse::<u64>() else {
         bot.answer_callback_query(query.id)
-            .text("❌ Ошибка: неверный ID в кнопке.")
+            .text(t!("errors.invalid_id", locale = &locale))
             .show_alert(true)
             .await?;
         return Ok(());
@@ -133,7 +140,7 @@ pub async fn handle_delete_request(
 
     if !can_delete {
         bot.answer_callback_query(query.id)
-            .text("❌ Удалить может только автор сообщения или администратор.")
+            .text(t!("errors.only_author_delete", locale = &locale))
             .show_alert(true)
             .await?;
         return Ok(());
@@ -154,9 +161,9 @@ pub async fn handle_delete_request(
         bot.edit_message_text(
             message.chat.id,
             message.id,
-            "Вы уверены, что хотите удалить?",
+            t!("common.delete_confirm_msg", locale = &locale),
         )
-        .reply_markup(confirm_delete_keyboard(target_user_id))
+        .reply_markup(confirm_delete_keyboard(target_user_id, &locale))
         .await?;
     } else {
         bot.delete_message(message.chat.id, message.id)
@@ -179,6 +186,7 @@ pub async fn handle_delete_confirmation(
     let Some(data) = query.data.as_ref() else {
         return Ok(());
     };
+    let locale = get_locale_by_id(query.from.id.0, &config).await;
 
     let parts: Vec<&str> = data.split(':').collect();
     if parts.len() != 3 {
@@ -201,7 +209,7 @@ pub async fn handle_delete_confirmation(
 
     if !can_delete {
         bot.answer_callback_query(query.id)
-            .text("❌ У вас нет прав для этого действия.")
+            .text(t!("errors.no_permission", locale = &locale))
             .show_alert(true)
             .await?;
         return Ok(());
@@ -241,9 +249,13 @@ pub async fn handle_delete_confirmation(
                 if is_transcription_message {
                     back_handler(bot, query, config).await?;
                 } else {
-                    bot.edit_message_text(message.chat.id, message.id, "✅ Действие отменено.")
-                        .reply_markup(InlineKeyboardMarkup::new(vec![vec![]]))
-                        .await?;
+                    bot.edit_message_text(
+                        message.chat.id,
+                        message.id,
+                        t!("common.action_cancelled", locale = &locale),
+                    )
+                    .reply_markup(InlineKeyboardMarkup::new(vec![vec![]]))
+                    .await?;
                 }
             }
         }
@@ -256,6 +268,7 @@ pub async fn handle_delete_confirmation(
 pub async fn handle_delete_data_confirmation(
     bot: Bot,
     query: CallbackQuery,
+    config: &Config,
 ) -> Result<(), MyError> {
     let Some(message) = query.message.as_ref() else {
         return Ok(());
@@ -263,6 +276,7 @@ pub async fn handle_delete_data_confirmation(
     let Some(data) = query.data.as_ref() else {
         return Ok(());
     };
+    let locale = get_locale_by_id(query.from.id.0, &config).await;
 
     let parts: Vec<&str> = data
         .strip_prefix("delete_data_confirm:")
@@ -280,7 +294,7 @@ pub async fn handle_delete_data_confirmation(
     let can_delete = has_data_delete_permission(&bot, message.chat(), &query.from).await;
     if !can_delete {
         bot.answer_callback_query(query.id)
-            .text("❌ У вас нет прав для этого действия.")
+            .text(t!("errors.no_permission", locale = &locale))
             .show_alert(true)
             .await?;
         return Ok(());
@@ -305,9 +319,9 @@ pub async fn handle_delete_data_confirmation(
             }
 
             let final_text = if owner.r#type == "user" {
-                "✅ Все ваши данные были успешно удалены."
+                t!("settings.delete_success_user", locale = &locale)
             } else {
-                "✅ Все данные этого чата были успешно удалены."
+                t!("settings.delete_success_group", locale = &locale)
             };
 
             bot.edit_message_text(message.chat().id, message.id(), final_text)
@@ -318,7 +332,7 @@ pub async fn handle_delete_data_confirmation(
             bot.edit_message_text(
                 message.chat().id,
                 message.id(),
-                "✅ Удаление данных отменено.",
+                t!("settings.delete_cancelled", locale = &locale),
             )
             .reply_markup(InlineKeyboardMarkup::new(vec![vec![]]))
             .await?;

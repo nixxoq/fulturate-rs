@@ -4,6 +4,7 @@ use crate::{
     },
     core::config::Config,
     errors::MyError,
+    util::i18n::get_chat_locale,
 };
 use log::error;
 use std::sync::Arc;
@@ -45,6 +46,7 @@ pub async fn handle_currency(bot: Bot, message: Message) -> Result<(), MyError> 
             return;
         }
 
+        let locale = get_chat_locale(&message.chat, &config).await;
         let converter = config.get_currency_converter();
         if let Some(text) = message.text() {
             let owner = Owner {
@@ -57,7 +59,7 @@ pub async fn handle_currency(bot: Bot, message: Message) -> Result<(), MyError> 
                 .to_string(),
             };
 
-            match converter.process_text(text, &owner).await {
+            match converter.process_text(text, &owner, &locale).await {
                 Ok(mut results) if !results.is_empty() => {
                     results.truncate(5);
 

@@ -1,5 +1,6 @@
 use crate::{
     core::{
+        config::Config,
         db::{
             functions::get_or_create,
             schemas::{BaseFunctions, CurrenciesFunctions, group::Group, user::User},
@@ -7,6 +8,8 @@ use crate::{
         services::currency::converter::{CURRENCY_CONFIG_PATH, get_all_currency_codes},
     },
     errors::MyError,
+    t,
+    util::i18n::get_chat_locale,
 };
 use log::error;
 use std::collections::HashSet;
@@ -15,10 +18,16 @@ use teloxide::{
     types::{ParseMode, ReplyParameters},
 };
 
-pub async fn handle_currency_update<T>(bot: Bot, msg: Message, code: String) -> Result<(), MyError>
+pub async fn handle_currency_update<T>(
+    bot: Bot,
+    msg: Message,
+    code: String,
+    config: &Config,
+) -> Result<(), MyError>
 where
     T: BaseFunctions + CurrenciesFunctions + Send + Sync,
 {
+    let locale = get_chat_locale(&msg.chat, config).await;
     let code = code.to_uppercase();
 
     let all_codes = get_all_currency_codes(CURRENCY_CONFIG_PATH.parse().unwrap())?;
@@ -27,7 +36,11 @@ where
     if currency.is_none() {
         bot.send_message(
             msg.chat.id,
-            format!("Currency code <code>{}</code> does not exist.", code),
+            t!(
+                "currencies.meta.code_not_found",
+                locale = &locale,
+                code = &code
+            ),
         )
         .parse_mode(ParseMode::Html)
         .reply_parameters(ReplyParameters::new(msg.id))
@@ -44,7 +57,7 @@ where
             );
             bot.send_message(
                 msg.chat.id,
-                "Error: Could not access settings. Try again later.",
+                t!("currencies.meta.settings_error", locale = &locale),
             )
             .reply_parameters(ReplyParameters::new(msg.id))
             .await?;
@@ -64,13 +77,17 @@ where
     };
 
     let message = match result {
-        Ok(action) => format!(
-            "Successfully {} <code>{}</code> from currency conversion.",
-            action, code
-        ),
+        Ok(action) => {
+            let key = if action == "removed" {
+                "currencies.meta.removed"
+            } else {
+                "currencies.meta.added"
+            };
+            t!(key, locale = &locale, code = &code)
+        }
         Err(e) => {
             error!("Failed to update currency for {}: {:?}", msg.chat.id, e);
-            "Failed to apply changes.".to_string()
+            t!("currencies.meta.failed", locale = &locale)
         }
     };
 

@@ -23,6 +23,7 @@ WORKDIR /app
 COPY --from=builder /app/fulturate/config.json .
 COPY --from=builder /app/fulturate/currencies.json .
 COPY --from=builder /app/target/release/fulturate .
+COPY --from=builder /app/fulturate/locales ./locales
 CMD ["./fulturate"]
 
 FROM debian:bookworm AS api-release

@@ -21,10 +21,10 @@ use crate::{
         },
     },
     errors::MyError,
-    util::i18n::{get_user_locale, set_user_locale},
+    util::i18n::{get_user_locale, set_locale},
+    t,
 };
 use log::info;
-use rust_i18n::t;
 use std::sync::Arc;
 use teloxide::{
     Bot,
@@ -277,7 +277,7 @@ pub async fn callback_query_handlers(bot: Bot, q: CallbackQuery) -> Result<(), M
         }) => {
             if q.from.id.0 != commander_id {
                 bot.answer_callback_query(q.id)
-                    .text(t!("errors.no_permission", locale = locale))
+                    .text(t!("errors.no_permission", locale = &locale))
                     .show_alert(true)
                     .await?;
                 return Ok(());
@@ -300,7 +300,7 @@ pub async fn callback_query_handlers(bot: Bot, q: CallbackQuery) -> Result<(), M
         }) => {
             if q.from.id.0 != commander_id {
                 bot.answer_callback_query(q.id)
-                    .text(t!("errors.no_permission", locale = locale))
+                    .text(t!("errors.no_permission", locale = &locale))
                     .show_alert(true)
                     .await?;
                 return Ok(());
@@ -324,13 +324,13 @@ pub async fn callback_query_handlers(bot: Bot, q: CallbackQuery) -> Result<(), M
         }) => {
             if q.from.id.0 != commander_id {
                 bot.answer_callback_query(q.id)
-                    .text(t!("errors.no_permission", locale = locale))
+                    .text(t!("errors.no_permission", locale = &locale))
                     .show_alert(true)
                     .await?;
                 return Ok(());
             }
 
-            set_user_locale(q.from.id.0, lang_code, &config).await?;
+            set_locale(owner_id, owner_type, lang_code, &config).await?;
             locale = lang_code.to_string();
 
             bot.answer_callback_query(q.id)
@@ -354,7 +354,7 @@ pub async fn callback_query_handlers(bot: Bot, q: CallbackQuery) -> Result<(), M
         }) => {
             if q.from.id.0 != commander_id {
                 bot.answer_callback_query(q.id)
-                    .text(t!("errors.no_permission", locale = locale))
+                    .text(t!("errors.no_permission", locale = &locale))
                     .show_alert(true)
                     .await?;
                 return Ok(());
@@ -384,7 +384,7 @@ pub async fn callback_query_handlers(bot: Bot, q: CallbackQuery) -> Result<(), M
             );
             if q.from.id.0 != commander_id {
                 bot.answer_callback_query(q.id)
-                    .text(t!("errors.no_permission", locale = locale))
+                    .text(t!("errors.no_permission", locale = &locale))
                     .show_alert(true)
                     .await?;
                 return Ok(());
@@ -417,7 +417,7 @@ pub async fn callback_query_handlers(bot: Bot, q: CallbackQuery) -> Result<(), M
             );
             if q.from.id.0 != commander_id {
                 bot.answer_callback_query(q.id)
-                    .text(t!("errors.no_permission", locale = locale))
+                    .text(t!("errors.no_permission", locale = &locale))
                     .show_alert(true)
                     .await?;
                 return Ok(());
@@ -446,7 +446,7 @@ pub async fn callback_query_handlers(bot: Bot, q: CallbackQuery) -> Result<(), M
             );
             if q.from.id.0 != commander_id && commander_id != 0 {
                 bot.answer_callback_query(q.id)
-                    .text(t!("errors.no_permission", locale = locale))
+                    .text(t!("errors.no_permission", locale = &locale))
                     .show_alert(true)
                     .await?;
                 return Ok(());
@@ -471,16 +471,16 @@ pub async fn callback_query_handlers(bot: Bot, q: CallbackQuery) -> Result<(), M
         Some(CallbackAction::DeleteData { commander_id }) => {
             if q.from.id.0 != commander_id {
                 bot.answer_callback_query(q.id)
-                    .text(t!("errors.no_permission", locale = locale))
+                    .text(t!("errors.no_permission", locale = &locale))
                     .show_alert(true)
                     .await?;
                 return Ok(());
             }
-            handle_delete_data(bot, q).await?
+            handle_delete_data(bot, q, &config).await?
         }
         Some(CallbackAction::CobaltPagination) => handle_cobalt_pagination(bot, q, config).await?,
         Some(CallbackAction::DeleteDataConfirmation) => {
-            handle_delete_data_confirmation(bot, q).await?
+            handle_delete_data_confirmation(bot, q, &config).await?
         }
         Some(CallbackAction::DeleteMessage) => handle_delete_request(bot, q, &config).await?,
         Some(CallbackAction::DeleteMessageConfirmation) => {

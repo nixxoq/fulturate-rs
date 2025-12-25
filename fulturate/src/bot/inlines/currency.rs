@@ -1,7 +1,12 @@
 use crate::{
-    bot::modules::{Owner, currency::CurrencySettings},
+    bot::{
+        inlines::cobalter::URL_REGEX,
+        modules::{Owner, currency::CurrencySettings},
+    },
     core::{config::Config, db::schemas::settings::Settings},
     errors::MyError,
+    t,
+    util::i18n::get_user_locale,
 };
 use log::{debug, error};
 use std::sync::Arc;
@@ -16,7 +21,12 @@ use teloxide::{
 use uuid::Uuid;
 
 pub async fn is_currency_query(q: InlineQuery) -> bool {
-    if !q.query.chars().any(|c| c.is_ascii_digit()) {
+    let query = q.query.trim();
+    if URL_REGEX.is_match(query) {
+        return false;
+    }
+
+    if !query.chars().any(|c| c.is_ascii_digit()) {
         return false;
     }
 
@@ -45,13 +55,15 @@ pub async fn handle_currency_inline(
 ) -> Result<(), MyError> {
     debug!("Handling currency inline query: {}", &q.query);
 
+    let locale = get_user_locale(&q.from, &config).await;
+
     let owner = Owner {
         id: q.from.id.to_string(),
         r#type: "user".to_string(),
     };
 
     let converter = config.get_currency_converter();
-    match converter.process_text(&q.query, &owner).await {
+    match converter.process_text(&q.query, &owner, &locale).await {
         Ok(mut results) if !results.is_empty() => {
             results.truncate(5);
 
@@ -71,7 +83,7 @@ pub async fn handle_currency_inline(
 
             let article = InlineQueryResultArticle::new(
                 Uuid::new_v4().to_string(),
-                "Результат конвертации",
+                t!("currencies.meta.inline_title", locale = &locale),
                 InputMessageContent::Text(
                     InputMessageContentText::new(final_message.clone()).parse_mode(ParseMode::Html),
                 ),

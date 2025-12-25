@@ -12,11 +12,11 @@ use crate::{
     },
     errors::MyError,
     util::{
-        i18n::get_locale_by_id,
+        i18n::get_locale_by_owner,
         paginator::{ItemsBuild, Paginator},
     },
+    t,
 };
-use rust_i18n::t;
 use serde::{Deserialize, Serialize};
 use teloxide::{
     prelude::*,
@@ -137,7 +137,7 @@ impl CurrencyModule {
         commander_id: u64,
     ) -> Result<(String, InlineKeyboardMarkup), MyError> {
         let config = Config::new().await;
-        let locale = get_locale_by_id(commander_id, &config).await;
+        let locale = get_locale_by_owner(&owner.id, &owner.r#type, &config).await;
 
         let settings: CurrencySettings = Settings::get_module_settings(owner, self.key()).await?;
 
@@ -204,10 +204,10 @@ impl CurrencyModule {
     }
 }
 
-pub async fn currency_codes_handler(bot: Bot, msg: Message, code: String) -> Result<(), MyError> {
+pub async fn currency_codes_handler(bot: Bot, msg: Message, code: String, config: &Config) -> Result<(), MyError> {
     if msg.chat.is_private() {
-        handle_currency_update::<DbUser>(bot, msg, code).await
+        handle_currency_update::<DbUser>(bot, msg, code, config).await
     } else {
-        handle_currency_update::<Group>(bot, msg, code).await
+        handle_currency_update::<Group>(bot, msg, code, config).await
     }
 }

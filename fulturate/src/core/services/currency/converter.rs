@@ -2,6 +2,7 @@ use crate::{
     bot::modules::{Owner, currency::CurrencySettings},
     core::db::schemas::settings::Settings,
     errors::MyError,
+    t,
     util::currency_values::WORD_VALUES,
 };
 use aho_corasick::AhoCorasick;
@@ -147,9 +148,9 @@ pub struct CurrencyStruct {
     pub one: String,
     pub few: String,
     pub many: String,
-    #[allow(dead_code)]
+    #[serde(default)]
     pub one_en: String,
-    #[allow(dead_code)]
+    #[serde(default)]
     pub many_en: String,
     pub is_target: bool,
 }
@@ -200,15 +201,11 @@ impl CurrencyDetector {
     }
 
     fn extract_number_end(&self, text: &str) -> Option<f64> {
-        text.split_whitespace()
-            .last()
-            .and_then(Self::parse_amount)
+        text.split_whitespace().last().and_then(Self::parse_amount)
     }
 
     fn extract_number_start(&self, text: &str) -> Option<f64> {
-        text.split_whitespace()
-            .next()
-            .and_then(Self::parse_amount)
+        text.split_whitespace().next().and_then(Self::parse_amount)
     }
 
     fn parse_amount(s: &str) -> Option<f64> {
@@ -367,6 +364,7 @@ impl CurrencyConverter {
         &self,
         text: &str,
         owner: &Owner,
+        locale: &str,
     ) -> Result<Vec<String>, ConvertError> {
         let settings: CurrencySettings = Settings::get_module_settings(owner, "currency")
             .await
@@ -385,7 +383,9 @@ impl CurrencyConverter {
         let mut results = Vec::new();
 
         for item in detected {
-            if let Some(res) = self.format_conversion(&item, &rates, &settings.selected_codes) {
+            if let Some(res) =
+                self.format_conversion(&item, &rates, &settings.selected_codes, locale)
+            {
                 results.push(res);
             }
         }
@@ -398,13 +398,14 @@ impl CurrencyConverter {
         item: &DetectedCurrency,
         rates: &HashMap<String, f64>,
         targets: &[String],
+        locale: &str,
     ) -> Option<String> {
         let info = self.currencies.get(&item.currency_code)?;
 
         let from_rate = rates.get(&item.currency_code)?;
         let mut builder = String::new();
 
-        let base_word = self.get_plural(item.amount, info);
+        let base_word = self.get_plural(item.amount, info, locale);
         builder.push_str(&format!(
             "{} {:.2}{} {}\n\n",
             info.flag, item.amount, info.symbol, base_word
@@ -419,7 +420,7 @@ impl CurrencyConverter {
                 (self.currencies.get(target_code), rates.get(target_code))
             {
                 let converted = item.amount * from_rate / to_rate;
-                let target_word = self.get_plural(converted, target_info);
+                let target_word = self.get_plural(converted, target_info, locale);
                 builder.push_str(&format!(
                     "{} {:.2}{} {}\n",
                     target_info.flag, converted, target_info.symbol, target_word
@@ -434,19 +435,60 @@ impl CurrencyConverter {
         }
     }
 
-    fn get_plural<'a>(&self, amount: f64, info: &'a CurrencyStruct) -> &'a str {
-        let n = amount.trunc() as u64;
-        let n100 = n % 100;
-        let n10 = n % 10;
+    fn get_plural(&self, amount: f64, info: &CurrencyStruct, locale: &str) -> String {
+        let suffix = if matches!(locale, "ru" | "uk" | "be") {
+            let n = amount.trunc() as u64;
+            let n100 = n % 100;
+            let n10 = n % 10;
 
-        if (11..=19).contains(&n100) {
-            &info.many
-        } else if n10 == 1 {
-            &info.one
-        } else if (2..=4).contains(&n10) {
-            &info.few
+            if (11..=19).contains(&n100) {
+                "many"
+            } else if n10 == 1 {
+                "one"
+            } else if (2..=4).contains(&n10) {
+                "few"
+            } else {
+                "many"
+            }
         } else {
-            &info.many
+            if (amount - 1.0).abs() < f64::EPSILON {
+                "one"
+            } else {
+                "many"
+            }
+        };
+
+        let key = format!("currencies.{}.{}", info.code, suffix);
+
+        let translated = t!(&key, locale = locale);
+
+        if translated == key || translated.is_empty() {
+            if locale == "en" {
+                match suffix {
+                    "one" => {
+                        if !info.one_en.is_empty() {
+                            info.one_en.clone()
+                        } else {
+                            info.one.clone()
+                        }
+                    }
+                    _ => {
+                        if !info.many_en.is_empty() {
+                            info.many_en.clone()
+                        } else {
+                            info.many.clone()
+                        }
+                    }
+                }
+            } else {
+                match suffix {
+                    "one" => info.one.clone(),
+                    "few" => info.few.clone(),
+                    _ => info.many.clone(),
+                }
+            }
+        } else {
+            translated
         }
     }
 }

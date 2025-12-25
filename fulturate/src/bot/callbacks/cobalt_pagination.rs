@@ -2,6 +2,8 @@ use crate::{
     bot::keyboards::cobalt::make_photo_pagination_keyboard,
     core::{config::Config, services::cobalt::DownloadResult},
     errors::MyError,
+    util::i18n::get_locale_by_id,
+    t,
 };
 use std::sync::Arc;
 use teloxide::{
@@ -40,6 +42,8 @@ pub async fn handle_cobalt_pagination(
     let Some(data) = q.data else { return Ok(()) };
     let parts: Vec<&str> = data.split(':').collect();
 
+    let locale = get_locale_by_id(q.from.id.0, &config).await;
+
     if parts.get(1) == Some(&"noop") {
         bot.answer_callback_query(q.id).await?;
         return Ok(());
@@ -52,7 +56,7 @@ pub async fn handle_cobalt_pagination(
 
     if q.from.id.0 != paging_data.original_user_id {
         bot.answer_callback_query(q.id)
-            .text("Вы не можете использовать эти кнопки.")
+            .text(t!("errors.no_permission", locale = &locale))
             .show_alert(true)
             .await?;
         return Ok(());
@@ -63,7 +67,7 @@ pub async fn handle_cobalt_pagination(
     let Ok(Some(DownloadResult::Photos { urls, original_url })) = redis.get(&cache_key).await
     else {
         bot.answer_callback_query(q.id)
-            .text("Извините, срок хранения этих фото истёк.")
+            .text(t!("errors.cache_expired", locale = &locale))
             .show_alert(true)
             .await?;
         return Ok(());
@@ -110,7 +114,7 @@ pub async fn handle_cobalt_pagination(
     {
         log::error!("Failed to edit message for pagination: {}", e);
         bot.answer_callback_query(q.id.clone())
-            .text("Не удалось обновить фото.")
+            .text(t!("errors.generic", locale = &locale))
             .await?;
     }
 

@@ -65,21 +65,24 @@ macro_rules! module {
                     use $crate::{
                         core::{db::schemas::settings::Settings, config::Config},
                         bot::modules::SimpleModuleSettings,
-                        util::i18n::get_locale_by_id,
+                        util::i18n::get_locale_by_owner,
+                        t,
                     };
                     use teloxide::types::{InlineKeyboardMarkup, InlineKeyboardButton};
-                    use rust_i18n::t;
 
                     let config = Config::new().await;
-                    let locale = get_locale_by_id(commander_id, &config).await;
+                    let locale = get_locale_by_owner(&owner.id, &owner.r#type, &config).await;
 
                     let settings: SimpleModuleSettings = Settings::get_module_settings(owner, self.key()).await?;
 
                     let name_key = format!("modules.{}.name", self.key());
                     let desc_key = format!("modules.{}.desc", self.key());
 
-                    let module_name = t!(&name_key, locale = &locale);
-                    let module_desc = t!(&desc_key, locale = &locale);
+                    let tr_name = t!(&name_key, locale = &locale);
+                    let module_name = if tr_name == name_key { self.name() } else { &tr_name };
+
+                    let tr_desc = t!(&desc_key, locale = &locale);
+                    let module_desc = if tr_desc == desc_key { self.description() } else { &tr_desc };
 
                     let status_key = if settings.enabled { "modules.status_on" } else { "modules.status_off" };
                     let status_text = t!(status_key, locale = &locale);
@@ -108,13 +111,6 @@ macro_rules! module {
                     ]);
 
                     Ok((text.to_string(), keyboard))
-                    // let text = standard_settings_header(self.name(), self.description(), settings.enabled);
-                    // let keyboard = InlineKeyboardMarkup::new(vec![
-                    //     vec![standard_toggle_button(self.key(), settings.enabled, commander_id)],
-                    //     vec![standard_back_button(owner, commander_id)],
-                    // ]);
-                    //
-                    // Ok((text, keyboard))
                 }
 
                 async fn handle_callback(

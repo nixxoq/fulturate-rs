@@ -1,4 +1,7 @@
-use crate::{bot::inlines::whisper::Whisper, core::config::Config, errors::MyError};
+use crate::{
+    bot::inlines::whisper::Whisper, core::config::Config, errors::MyError, t,
+    util::i18n::get_locale_by_id,
+};
 use teloxide::{
     Bot,
     payloads::{AnswerCallbackQuerySetters, EditMessageTextSetters},
@@ -23,6 +26,7 @@ pub async fn handle_whisper_callback(
     let whisper_id = parts[2];
 
     let user = q.from.clone();
+    let locale = get_locale_by_id(user.id.0, &config).await;
 
     let redis_key = format!("whisper:{}", whisper_id);
 
@@ -32,7 +36,7 @@ pub async fn handle_whisper_callback(
         Some(w) => w,
         None => {
             bot.answer_callback_query(q.id)
-                .text("❌ Этот шепот истек или был забыт.")
+                .text(t!("whisper.expired", locale = &locale))
                 .show_alert(true)
                 .await?;
             return Ok(());
@@ -57,7 +61,7 @@ pub async fn handle_whisper_callback(
 
     if !is_sender && !is_recipient {
         bot.answer_callback_query(q.id)
-            .text("🤫 Это не для тебя.")
+            .text(t!("modules.whisper.not_for_you", locale = &locale))
             .show_alert(true)
             .await?;
         return Ok(());
@@ -72,16 +76,20 @@ pub async fn handle_whisper_callback(
         }
         "forget" => {
             config.get_redis_client().delete(&redis_key).await?;
-            bot.answer_callback_query(q.id).text("Шепот забыт.").await?;
+            bot.answer_callback_query(q.id)
+                .text(t!("whisper.forgotten_alert", locale = &locale))
+                .await?;
 
             if let Some(message) = q.message {
-                bot.edit_message_text(
-                    message.chat().id,
-                    message.id(),
-                    format!("🤫 Шепот от {} был забыт.", whisper.sender_first_name),
-                )
-                .reply_markup(InlineKeyboardMarkup::new(vec![vec![]]))
-                .await?;
+                let text = t!(
+                    "whisper.forgotten_msg",
+                    locale = &locale,
+                    name = whisper.sender_first_name
+                );
+
+                bot.edit_message_text(message.chat().id, message.id(), text)
+                    .reply_markup(InlineKeyboardMarkup::new(vec![vec![]]))
+                    .await?;
             }
         }
         _ => {}

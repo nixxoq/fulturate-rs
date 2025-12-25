@@ -2,9 +2,9 @@ use crate::{
     bot::modules::{Module, ModuleSettings, Owner},
     core::{config::Config, db::schemas::settings::Settings},
     errors::MyError,
-    util::i18n::get_locale_by_id,
+    util::i18n::get_locale_by_owner,
+    t,
 };
-use rust_i18n::t;
 use serde::{Deserialize, Serialize};
 use teloxide::{
     prelude::*,
@@ -156,7 +156,7 @@ impl SpeechRecognitionModule {
     ) -> Result<(String, InlineKeyboardMarkup), MyError> {
         let s: SpeechRecognitionSettings = Settings::get_module_settings(owner, self.key()).await?;
         let config = Config::new().await;
-        let locale = get_locale_by_id(cid, &config).await;
+        let locale = get_locale_by_owner(&owner.id, &owner.r#type, &config).await;
 
         let module_name = t!("modules.speech.name", locale = &locale);
         let module_desc = t!("modules.speech.desc", locale = &locale);
@@ -244,8 +244,10 @@ impl SpeechRecognitionModule {
         cid: u64,
     ) -> Result<(String, InlineKeyboardMarkup), MyError> {
         let s: SpeechRecognitionSettings = Settings::get_module_settings(owner, self.key()).await?;
+
         let config = Config::new().await;
-        let locale = get_locale_by_id(cid, &config).await;
+        let locale = get_locale_by_owner(&owner.id, &owner.r#type, &config).await;
+
         let models = [SpeechModel::Gemini25Flash, SpeechModel::Gemini25Pro];
 
         let trans_lbl = t!("modules.speech.transcription", locale = &locale);

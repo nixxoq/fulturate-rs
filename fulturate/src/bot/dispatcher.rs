@@ -6,8 +6,8 @@ use crate::{
         inlines::{
             cobalter::{handle_cobalt_inline, handle_inline_video, is_query_url},
             currency::{handle_currency_inline, is_currency_query},
+            translate::{handle_translate_inline, is_translate_query},
             whisper::{handle_whisper_inline, is_whisper_query},
-            translate::{handle_translate_inline, is_translate_query}
         },
         keyboards::delete::delete_message_button_no_confirm,
         messager::{handle_currency, handle_speech},
@@ -19,7 +19,8 @@ use crate::{
         db::schemas::{settings::Settings, user::User as DBUser},
     },
     errors::MyError,
-    util::enums::Command,
+    util::{enums::Command, i18n::get_locale_by_id},
+    t,
 };
 use log::{debug, error, info};
 use mongodb::bson::doc;
@@ -71,25 +72,33 @@ async fn is_user_registered(q: InlineQuery) -> bool {
         .is_ok_and(|user| user.is_some())
 }
 
-async fn prompt_registration(bot: Bot, q: InlineQuery, me: Me) -> Result<(), MyError> {
+async fn prompt_registration(
+    bot: Bot,
+    q: InlineQuery,
+    me: Me,
+    config: Arc<Config>,
+) -> Result<(), MyError> {
     let user_id_str = q.from.id.to_string();
     debug!("User {} not found. Offering to register.", user_id_str);
+
+    let locale = get_locale_by_id(q.from.id.0, &config).await;
 
     let start_url = format!("https://t.me/{}?start=inl", me.username());
 
     let keyboard = InlineKeyboardMarkup::new(vec![vec![InlineKeyboardButton::url(
-        "▶️ Зарегистрироваться".to_string(),
+        t!("inline.btn_register", locale = &locale),
         start_url.parse()?,
     )]]);
 
     let article = InlineQueryResultArticle::new(
         "register_prompt",
-        "Вы не зарегистрированы",
-        InputMessageContent::Text(InputMessageContentText::new(
-            "Чтобы использовать бота, пожалуйста, сначала начните диалог с ним.",
-        )),
+        t!("inline.not_registered_title", locale = &locale),
+        InputMessageContent::Text(InputMessageContentText::new(t!(
+            "inline.not_registered_text",
+            locale = &locale
+        ))),
     )
-    .description("Нажмите здесь, чтобы начать чат с ботом и разблокировать все функции.")
+    .description(t!("inline.not_registered_text", locale = &locale))
     .reply_markup(keyboard);
 
     if let Err(e) = bot
@@ -128,15 +137,22 @@ async fn are_any_inline_modules_enabled(q: InlineQuery) -> bool {
     false
 }
 
-async fn send_modules_disabled_message(bot: Bot, q: InlineQuery) -> Result<(), MyError> {
+async fn send_modules_disabled_message(
+    bot: Bot,
+    q: InlineQuery,
+    config: Arc<Config>,
+) -> Result<(), MyError> {
+    let locale = get_locale_by_id(q.from.id.0, &config).await;
+
     let article = InlineQueryResultArticle::new(
         "modules_disabled",
-        "Все модули выключены",
-        InputMessageContent::Text(InputMessageContentText::new(
-            "Все инлайн-модули выключены. Чтобы ими воспользоваться, активируйте их в настройках.",
-        )),
+        t!("inline.modules_disabled_title", locale = &locale),
+        InputMessageContent::Text(InputMessageContentText::new(t!(
+            "inline.modules_disabled_text",
+            locale = &locale
+        ))),
     )
-    .description("Используйте /settings в чате с ботом, чтобы включить их.");
+    .description(t!("inline.modules_disabled_text", locale = &locale));
 
     bot.answer_inline_query(q.id, vec![InlineQueryResult::Article(article)])
         .cache_time(10)
@@ -160,8 +176,8 @@ pub fn inline_query_handler() -> Handler<'static, Result<(), MyError>, DpHandler
         .branch(
             dptree::filter_async(is_user_registered)
                 .filter_async(are_any_inline_modules_enabled)
-                .branch(dptree::filter_async(is_currency_query).endpoint(handle_currency_inline))
                 .branch(dptree::filter_async(is_query_url).endpoint(handle_cobalt_inline))
+                .branch(dptree::filter_async(is_currency_query).endpoint(handle_currency_inline))
                 // .branch(dptree::filter_async(is_math_query).endpoint(handle_math_inline))
                 .branch(dptree::filter_async(is_translate_query).endpoint(handle_translate_inline))
                 .branch(dptree::filter_async(is_whisper_query).endpoint(handle_whisper_inline)),

@@ -64,11 +64,12 @@ services:
     networks:
       - fulturate-net
     environment:
+      - RUST_LOG=trace
       - BOT_TOKEN=7643136153:AAGGOdjQXtBnEUwFqFfvkrvo7AsxNssWzBA
       - GEMINI_API_KEY=AIzaSyDnY18JX8tJpnLFLdWqnQDNoi6RGQqoH4I
       - OWNERS=701733705,6452350296
       - MONGODB_URL=mongodb://mongo:27017/?w=majority&journal=true
-      - RUST_LOG=info,debug,error
+#      - RUST_LOG=info,debug,error
       - REDIS_URL=redis://redis:6379/
       - COBALT_API_KEY=3093a2c7-c1de-43f5-8ec0-96204d67d101
       - LOG_CHAT_ID=-1002822733415
@@ -77,6 +78,7 @@ services:
       - TELEGRAM_API_URL=http://telegram_api:8081
     volumes:
       - telegram_bot_api_data:/var/lib/telegram-bot-api
+      - ./fulturate/locales:/app/locales
 #    env_file:
 #      - ./fulturate/.env
 

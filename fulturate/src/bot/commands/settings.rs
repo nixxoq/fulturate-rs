@@ -2,11 +2,12 @@ use crate::{
     bot::modules::{Owner, registry::MOD_MANAGER},
     core::{config::Config, db::schemas::settings::Settings},
     errors::MyError,
-    util::i18n::get_user_locale,
+    t,
+    util::i18n::get_chat_locale,
 };
-use rust_i18n::{available_locales, t};
 use teloxide::prelude::*;
 use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup};
+use crate::util::i18n::get_available_locales;
 
 pub async fn settings_command_handler(
     bot: Bot,
@@ -24,7 +25,7 @@ pub async fn settings_command_handler(
     }
     .to_string();
 
-    let locale = get_user_locale(commander, config).await;
+    let locale = get_chat_locale(&message.chat, config).await;
 
     let (text, keyboard) = get_main_settings_menu(&locale, &owner_type, &owner_id, commander_id);
 
@@ -73,11 +74,11 @@ pub fn get_lang_settings_menu(
 ) -> (String, InlineKeyboardMarkup) {
     let text = t!("settings.lang_header", locale = locale);
 
-    let available = available_locales!();
+    let available = get_available_locales();
     let mut lang_buttons = Vec::new();
 
     for lang_code in available {
-        let label = t!("meta.lang", locale = lang_code);
+        let label = t!("meta.lang", locale = &lang_code);
 
         let display_label = if label == "meta.lang" {
             lang_code.to_uppercase()

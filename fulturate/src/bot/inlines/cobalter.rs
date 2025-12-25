@@ -11,7 +11,8 @@ use crate::{
         },
     },
     errors::MyError,
-    util::MAX_DURATION_SECONDS,
+    t,
+    util::{MAX_DURATION_SECONDS, i18n::get_user_locale},
 };
 use ccobalt::model::request::{DownloadRequest, FilenameStyle};
 use once_cell::sync::Lazy;
@@ -27,8 +28,8 @@ use teloxide::{
 };
 use tokio::fs;
 
-static URL_REGEX: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"^(https?)://[^\s/$.?#].[^\s]*$").unwrap());
+pub static URL_REGEX: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"^(https?)://[^\s/$.?#].\S*$").unwrap());
 
 struct TempGuard {
     path: PathBuf,
@@ -133,16 +134,18 @@ fn build_results_from_media(
     media: DownloadResult,
     url_hash: &str,
     user_id: u64,
+    locale: &str,
 ) -> Vec<InlineQueryResult> {
     match media {
         DownloadResult::Video { .. } => {
             let url_kb = make_single_url_keyboard(original_url);
             let result = InlineQueryResultArticle::new(
                 format!("cobalt_video:{}", url_hash),
-                "Скачать видео",
-                InputMessageContent::Text(InputMessageContentText::new(
-                    "Нажмите, чтобы отправить видео",
-                )),
+                t!("modules.cobalt.inline_download", locale = locale),
+                InputMessageContent::Text(InputMessageContentText::new(t!(
+                    "modules.cobalt.inline_send",
+                    locale = locale
+                ))),
             )
             .reply_markup(url_kb);
             vec![result.into()]
@@ -194,6 +197,8 @@ pub async fn handle_cobalt_inline(
         r#type: "user".to_string(),
     };
 
+    let locale = get_user_locale(&q.from, &config).await;
+
     let url_hash_digest = md5::compute(url);
     let url_hash = format!("{:x}", url_hash_digest);
     let cache_key = format!("cobalt_cache:{}", url_hash);
@@ -212,17 +217,25 @@ pub async fn handle_cobalt_inline(
             DownloadResult::Video { original_url, .. } => original_url.clone(),
             DownloadResult::Photos { original_url, .. } => original_url.clone(),
         };
-        build_results_from_media(&original_url_str, download_result, &url_hash, user_id)
+        build_results_from_media(
+            &original_url_str,
+            download_result,
+            &url_hash,
+            user_id,
+            &locale,
+        )
     } else {
         match video_metadata::get_from_url(url).await {
             Ok(meta) if meta.duration > MAX_DURATION_SECONDS => {
                 let minutes = MAX_DURATION_SECONDS / 60;
+
                 let error_article = InlineQueryResultArticle::new(
                     "error_duration",
-                    "Видео слишком длинное",
-                    InputMessageContent::Text(InputMessageContentText::new(format!(
-                        "❌ Видео дольше {} минут и не может быть обработано.",
-                        minutes
+                    t!("modules.cobalt.error_duration_title", locale = &locale),
+                    InputMessageContent::Text(InputMessageContentText::new(t!(
+                        "modules.cobalt.error_too_long",
+                        locale = &locale,
+                        minutes = minutes
                     ))),
                 )
                 .description(format!("Максимальная длительность: {} минут", minutes));
@@ -242,7 +255,7 @@ pub async fn handle_cobalt_inline(
             Ok(Some(download_result)) => {
                 let cache_entry = CobaltCache::Pending(download_result.clone());
                 redis.set(&cache_key, &cache_entry, 24 * 60 * 60).await?;
-                build_results_from_media(url, download_result, &url_hash, user_id)
+                build_results_from_media(url, download_result, &url_hash, user_id, &locale)
             }
             _ => {
                 vec![]
@@ -265,8 +278,13 @@ pub async fn handle_inline_video(
         return Ok(());
     };
 
-    bot.edit_message_text_inline(&inline_message_id, "⏳ Обрабатываю видео...")
-        .await?;
+    let locale = get_user_locale(&chosen.from, &config).await;
+
+    bot.edit_message_text_inline(
+        &inline_message_id,
+        t!("modules.cobalt.processing", locale = &locale),
+    )
+    .await?;
 
     let redis = config.get_redis_client();
     let cache_key = format!("cobalt_cache:{}", url_hash);
@@ -296,8 +314,11 @@ pub async fn handle_inline_video(
                 None
             };
 
-            bot.edit_message_text_inline(&inline_message_id, "⏳ Загружаю видео...")
-                .await?;
+            bot.edit_message_text_inline(
+                &inline_message_id,
+                t!("modules.cobalt.uploading", locale = &locale),
+            )
+            .await?;
 
             let log_channel_id = ChatId(config.get_log_chat_id().parse().unwrap());
 
@@ -380,8 +401,11 @@ pub async fn handle_inline_video(
             )
         }
         _ => {
-            bot.edit_message_text_inline(inline_message_id, "❌ Ошибка: видео не найдено в кэше.")
-                .await?;
+            bot.edit_message_text_inline(
+                inline_message_id,
+                t!("modules.cobalt.cache_error", locale = &locale),
+            )
+            .await?;
             return Ok(());
         }
     };
@@ -400,8 +424,11 @@ pub async fn handle_inline_video(
         .await
     {
         log::error!("Failed to send video with file_id: {:?}", e);
-        bot.edit_message_text_inline(inline_message_id, "❌ Ошибка: не удалось отправить видео.")
-            .await?;
+        bot.edit_message_text_inline(
+            inline_message_id,
+            t!("modules.cobalt.send_error", locale = &locale),
+        )
+        .await?;
     }
 
     Ok(())

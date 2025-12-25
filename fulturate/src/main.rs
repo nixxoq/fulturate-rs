@@ -1,10 +1,28 @@
-use fulturate::bot::dispatcher::run;
+use fulturate::{bot::dispatcher::run, util::i18n::load_locales};
 use log::{error, info};
+use std::time::Duration;
+use tokio::time::interval;
 
 #[tokio::main]
 async fn main() {
     dotenv::dotenv().ok();
     pretty_env_logger::init();
+
+    load_locales();
+
+    tokio::spawn(async move {
+        let mut timer = interval(Duration::from_secs(60)); // TODO: change to 2 hours
+        timer.tick().await;
+
+        loop {
+            timer.tick().await;
+            info!("[LOCALE] reloading locales...");
+            let _ = tokio::task::spawn_blocking(|| {
+                load_locales();
+            })
+            .await;
+        }
+    });
 
     info!("Bot starting...");
 

@@ -1,11 +1,13 @@
 use crate::{
-    bot::modules::{translate::TranslateSettings, Owner},
+    bot::modules::{Owner, translate::TranslateSettings},
     core::{
         config::Config,
         db::schemas::settings::Settings,
-        services::translation::{normalize_language_code, SUPPORTED_LANGUAGES},
+        services::translation::{SUPPORTED_LANGUAGES, normalize_language_code},
     },
     errors::MyError,
+    t,
+    util::i18n::get_user_locale,
 };
 use futures::future::join_all;
 use std::sync::Arc;
@@ -25,17 +27,19 @@ pub async fn handle_translate_inline(
     q: InlineQuery,
     config: Arc<Config>,
 ) -> Result<(), MyError> {
+    let locale = get_user_locale(&q.from, &config).await;
     let text_to_translate = q.query.trim();
 
     if text_to_translate.is_empty() {
         let help_article = InlineQueryResultArticle::new(
             "translate_help",
-            "Как использовать inline-перевод?",
-            InputMessageContent::Text(InputMessageContentText::new(
-                "Просто начните вводить текст, который хотите перевести.",
-            )),
+            t!("modules.translate.help_title", locale = &locale),
+            InputMessageContent::Text(InputMessageContentText::new(t!(
+                "modules.translate.help_text",
+                locale = &locale
+            ))),
         )
-            .description("Введите текст для перевода...");
+        .description(t!("translate.help_desc", locale = &locale));
 
         bot.answer_inline_query(q.id, vec![InlineQueryResult::Article(help_article)])
             .cache_time(10)
@@ -46,7 +50,13 @@ pub async fn handle_translate_inline(
     let redis_key = format!("user_lang:{}", q.from.id);
     let cached_lang: Option<String> = config.get_redis_client().get(&redis_key).await?;
 
-    let mut target_langs = vec!["en".to_string(), "ru".to_string(), "uk".to_string(), "de".to_string()];
+    // TODO: impl custom target languages
+    let mut target_langs = vec![
+        "en".to_string(),
+        "ru".to_string(),
+        "uk".to_string(),
+        "de".to_string(),
+    ];
     if let Some(lang) = cached_lang {
         target_langs.retain(|l| l != &lang);
         target_langs.insert(0, lang);
@@ -74,12 +84,13 @@ pub async fn handle_translate_inline(
     if successful_translations.is_empty() {
         let no_result_article = InlineQueryResultArticle::new(
             "translate_no_result",
-            "Не удалось перевести",
-            InputMessageContent::Text(InputMessageContentText::new(
-                "Не удалось выполнить перевод. Попробуйте позже.",
-            )),
+            t!("translate.failed_title", locale = &locale),
+            InputMessageContent::Text(InputMessageContentText::new(t!(
+                "translate.failed",
+                locale = &locale
+            ))),
         )
-            .description("Сервис перевода может быть недоступен.");
+        .description(t!("translate.failed_desc", locale = &locale));
 
         bot.answer_inline_query(q.id, vec![InlineQueryResult::Article(no_result_article)])
             .await?;
@@ -96,10 +107,14 @@ pub async fn handle_translate_inline(
 
         let article = InlineQueryResultArticle::new(
             Uuid::new_v4().to_string(),
-            format!("Перевод на {}", lang_display_name),
+            t!(
+                "translate.result_title",
+                locale = &locale,
+                lang = lang_display_name
+            ),
             InputMessageContent::Text(InputMessageContentText::new(translated_text.clone())),
         )
-            .description(translated_text);
+        .description(translated_text);
         articles.push(InlineQueryResult::Article(article));
     }
 
@@ -114,6 +129,8 @@ pub async fn is_translate_query(q: InlineQuery) -> bool {
         r#type: "user".to_string(),
     };
 
-    let settings = Settings::get_module_settings::<TranslateSettings>(&owner, "translate").await.unwrap();
+    let settings = Settings::get_module_settings::<TranslateSettings>(&owner, "translate")
+        .await
+        .unwrap();
     settings.enabled
 }
