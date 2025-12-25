@@ -73,6 +73,8 @@
       "attr_off": "Attribution: Off ❌",
       "error_duration_title": "Video too long",
       "error_too_long": "❌ Video is longer than %{minutes} minutes and cannot be processed.",
+      "error_processing_title": "Processing Error",
+      "error_processing": "❌ An error occurred while processing the video.",
       "processing": "⏳ Processing video...",
       "uploading": "⏳ Uploading video...",
       "inline_download": "Download video",

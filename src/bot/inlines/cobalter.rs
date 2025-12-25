@@ -258,7 +258,15 @@ pub async fn handle_cobalt_inline(
                 build_results_from_media(url, download_result, &url_hash, user_id, &locale)
             }
             _ => {
-                vec![]
+                let error_article = InlineQueryResultArticle::new(
+                    "error_processing",
+                    t!("modules.cobalt.error_processing_title", locale = &locale),
+                    InputMessageContent::Text(InputMessageContentText::new(t!(
+                        "modules.cobalt.error_processing",
+                        locale = &locale
+                    ))),
+                );
+                vec![error_article.into()]
             }
         }
     };

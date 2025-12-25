@@ -19,12 +19,12 @@ use crate::{
         db::schemas::{settings::Settings, user::User as DBUser},
     },
     errors::MyError,
-    util::{enums::Command, i18n::get_locale_by_id},
     t,
+    util::{enums::Command, i18n::get_locale_by_id},
 };
 use log::{debug, error, info};
 use mongodb::bson::doc;
-use oximod::{Model, set_global_client};
+use oximod::{Model, OxiClient};
 use serde::Deserialize;
 use std::{convert::Infallible, fmt::Write, ops::ControlFlow, sync::Arc};
 use teloxide::{
@@ -223,7 +223,7 @@ async fn run_bot(config: Arc<Config>) -> Result<(), MyError> {
 
 async fn run_database(config: Arc<Config>) -> Result<(), MyError> {
     let url = config.get_mongodb_url().to_owned();
-    set_global_client(url.clone()).await?;
+    OxiClient::init_global(url.clone()).await?;
     info!("Database connected successfully. URL: {}", url);
     Ok(())
 }

@@ -73,6 +73,8 @@
       "attr_off": "Атрибуция: Выкл ❌",
       "error_duration_title": "Видео слишком длинное",
       "error_too_long": "❌ Видео дольше %{minutes} минут и не может быть обработано.",
+      "error_processing_title": "Ошибка обработки",
+      "error_processing": "❌ Произошла ошибка при обработке видео.",
       "processing": "⏳ Обрабатываю видео...",
       "uploading": "⏳ Загружаю видео...",
       "inline_download": "Скачать видео",
