@@ -4,6 +4,7 @@ use crate::{
     core::{config::Config, db::schemas::settings::Settings},
     errors::MyError,
 };
+use anyhow::{Context, anyhow};
 use eidolon_lang::interpreter::evaluate;
 use eidolon_lang::interpreter::value::EidolonValue;
 use image::{ImageBuffer, ImageFormat, Rgb};
@@ -30,14 +31,14 @@ fn generate_plot(expression: &str) -> Result<Vec<u8>, MyError> {
     let height = 600;
     let mut pixel_buffer: Vec<u8> = vec![0; (width * height * 3) as usize];
 
-    let ast =
-        eidolon_lang::parse_eidolon_source(expression).map_err(|e| MyError::Other(e.message))?;
+    let ast = eidolon_lang::parse_eidolon_source(expression)
+        .map_err(|e| anyhow!("Parsing error: {}", e.message))?;
 
     {
         let root =
             BitMapBackend::with_buffer(&mut pixel_buffer, (width, height)).into_drawing_area();
         root.fill(&WHITE)
-            .map_err(|e| MyError::Plotting(e.to_string()))?;
+            .map_err(|e| anyhow!("Plotting fill error: {}", e))?;
 
         let mut chart = ChartBuilder::on(&root)
             .caption(
@@ -48,12 +49,12 @@ fn generate_plot(expression: &str) -> Result<Vec<u8>, MyError> {
             .x_label_area_size(40)
             .y_label_area_size(40)
             .build_cartesian_2d(-10f64..10f64, -5f64..5f64)
-            .map_err(|e| MyError::Plotting(e.to_string()))?;
+            .map_err(|e| anyhow!("Chart build error: {}", e))?;
 
         chart
             .configure_mesh()
             .draw()
-            .map_err(|e| MyError::Plotting(e.to_string()))?;
+            .map_err(|e| anyhow!("Mesh draw error: {}", e))?;
 
         chart
             .draw_series(LineSeries::new(
@@ -68,21 +69,20 @@ fn generate_plot(expression: &str) -> Result<Vec<u8>, MyError> {
                 }),
                 &RED,
             ))
-            .map_err(|e| MyError::Plotting(e.to_string()))?;
+            .map_err(|e| anyhow!("Series draw error: {}", e))?;
 
         root.present()
-            .map_err(|e| MyError::Plotting(e.to_string()))?;
+            .map_err(|e| anyhow!("Plot present error: {}", e))?;
     }
 
     let mut png_buffer: Vec<u8> = Vec::new();
     let image_buffer: ImageBuffer<Rgb<u8>, Vec<u8>> =
-        ImageBuffer::from_raw(width, height, pixel_buffer).ok_or_else(|| {
-            MyError::Plotting("Failed to create image buffer from raw pixels".to_string())
-        })?;
+        ImageBuffer::from_raw(width, height, pixel_buffer)
+            .ok_or_else(|| anyhow!("Failed to create image buffer from raw pixels"))?;
 
     image_buffer
         .write_to(&mut Cursor::new(&mut png_buffer), ImageFormat::Png)
-        .map_err(|e| MyError::Plotting(format!("Failed to encode image to PNG: {}", e)))?;
+        .context("Failed to encode image to PNG")?;
 
     Ok(png_buffer)
 }
@@ -115,7 +115,7 @@ pub async fn handle_math_inline(
     if expression.to_lowercase().contains('x') {
         match generate_plot(expression) {
             Ok(image_bytes) => {
-                let archive_chat_id: i64 = config.get_archive_chat_id().parse().unwrap();
+                let archive_chat_id: i64 = config.get_archive_chat_id().parse()?;
                 let photo_file = InputFile::memory(image_bytes);
 
                 println!("{}, {:?}", archive_chat_id, photo_file);

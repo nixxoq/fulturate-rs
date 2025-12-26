@@ -20,7 +20,7 @@ impl IntoFilter for String {
     }
 }
 
-impl<'a> IntoFilter for &'a str {
+impl IntoFilter for &str {
     fn to_filter(self, key_field: &str) -> Document {
         doc! { key_field: self }
     }

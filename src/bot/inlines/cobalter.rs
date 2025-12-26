@@ -14,6 +14,7 @@ use crate::{
     t,
     util::{MAX_DURATION_SECONDS, i18n::get_user_locale},
 };
+use anyhow::anyhow;
 use ccobalt::model::request::{DownloadRequest, FilenameStyle};
 use once_cell::sync::Lazy;
 use regex::Regex;
@@ -46,6 +47,7 @@ impl Drop for TempGuard {
 mod video_metadata {
     use super::{MyError, TempGuard};
     use serde::Deserialize;
+    use anyhow::Context;
     use std::path::{Path, PathBuf};
     use tokio::process::Command;
 
@@ -74,7 +76,8 @@ mod video_metadata {
         if !ytdlp_output.status.success() {
             let stderr = String::from_utf8_lossy(&ytdlp_output.stderr);
             log::error!("yt-dlp failed for URL '{}'. Stderr: {}", url, stderr);
-            return Err("Failed to execute yt-dlp".into());
+            // return Err("Failed to execute yt-dlp".into());
+            return Err(anyhow::anyhow!("Failed to execute yt-dlp"));
         }
 
         let metadata: YtDlpOutput = serde_json::from_slice(&ytdlp_output.stdout)?;
@@ -97,12 +100,12 @@ mod video_metadata {
         let path_clone = thumb_path.clone();
         tokio::task::spawn_blocking(move || -> Result<(), MyError> {
             let img = image::load_from_memory(&response)
-                .map_err(|e| format!("Failed to load image: {}", e))?;
+                .context("Failed to load image from memory")?;
             let scaled = img.resize(320, 320, image::imageops::FilterType::Lanczos3);
 
             scaled
                 .save_with_format(&path_clone, image::ImageFormat::Jpeg)
-                .map_err(|e| format!("Failed to save image: {}", e))?;
+                .context("Failed to save scaled thumbnail")?;
 
             Ok(())
         })
@@ -328,7 +331,7 @@ pub async fn handle_inline_video(
             )
             .await?;
 
-            let log_channel_id = ChatId(config.get_log_chat_id().parse().unwrap());
+            let log_channel_id = ChatId(config.get_log_chat_id().parse()?);
 
             let owner = Owner {
                 id: chosen.from.id.to_string(),
@@ -375,7 +378,7 @@ pub async fn handle_inline_video(
 
             let video = video_msg
                 .video()
-                .ok_or("Failed to get video from message")?;
+                .ok_or_else(|| anyhow!("Failed to get video from message"))?;
             let file_id = video.file.id.clone();
 
             let thumb_id = video

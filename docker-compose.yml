@@ -15,7 +15,7 @@ services:
     networks:
       - fulturate-net
     volumes:
-      - ./data/mongo:/data/db
+      - mongo-data:/data/db
 
   telegram_api:
     image: aiogram/telegram-bot-api:latest
@@ -29,6 +29,8 @@ services:
       - .env
     environment:
       - TELEGRAM_LOCAL=1
+      - TELEGRAM_API_ID=28090001
+      - TELEGRAM_API_HASH=a38cfe08329526d8cb130acbdddacbbd
     volumes:
       - ./data/telegram-bot-api:/var/lib/telegram-bot-api
 
@@ -57,6 +59,7 @@ services:
 volumes:
   cargo-cache:
   target-cache:
+  mongo-data:
 
 
 networks:

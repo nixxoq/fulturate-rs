@@ -1,7 +1,7 @@
 use crate::{
     bot::modules::{Owner, currency::CurrencySettings},
     core::db::schemas::settings::Settings,
-    errors::MyError,
+    errors::{BotError, MyError},
     t,
     util::currency_values::WORD_VALUES,
 };
@@ -214,45 +214,40 @@ impl CurrencyDetector {
             return None;
         }
 
-        let mut total_value = 0.0;
-        let mut current_digits = String::new();
-        let mut current_suffix = String::new();
+        let mut total = 0.0;
+        let mut rest = s_clean.as_str();
 
-        let process_chunk = |digits: &str, suffix: &str| -> Option<f64> {
-            if digits.is_empty() {
-                return Some(0.0);
+        while !rest.is_empty() {
+            let digit_end = rest
+                .find(|c: char| !c.is_ascii_digit() && c != '.')
+                .unwrap_or(rest.len());
+
+            let (num_s, remainder) = rest.split_at(digit_end);
+            if num_s.is_empty() {
+                return None;
             }
-            let val = digits.parse::<f64>().ok()?;
 
-            if suffix.is_empty() {
-                return Some(val);
-            }
+            let value = num_s.parse::<f64>().ok()?;
+            rest = remainder;
 
-            if let Some(info) = WORD_VALUES.get(suffix)
-                && info.is_multiplier
-            {
-                return Some(val * info.value);
-            }
-            None
-        };
-
-        for c in s_clean.chars() {
-            if c.is_ascii_digit() || c == '.' {
-                if !current_suffix.is_empty() {
-                    total_value += process_chunk(&current_digits, &current_suffix)?;
-                    current_digits.clear();
-                    current_suffix.clear();
+            let suffix_end = rest
+                .find(|c: char| c.is_ascii_digit() || c == '.')
+                .unwrap_or(rest.len());
+            let (suffix, remainder) = rest.split_at(suffix_end);
+            if !suffix.is_empty() {
+                let info = WORD_VALUES.get(suffix)?;
+                if !info.is_multiplier {
+                    return None;
                 }
-                current_digits.push(c);
+                total += value * info.value;
             } else {
-                current_suffix.push(c);
+                total += value
             }
+            rest = remainder;
         }
 
-        total_value += process_chunk(&current_digits, &current_suffix)?;
-
-        if total_value > 0.0 || s_clean.contains('0') {
-            Some(total_value)
+        if total > 0.0 || s_clean.contains('0') {
+            Some(total)
         } else {
             None
         }
@@ -406,9 +401,11 @@ impl CurrencyConverter {
         let mut builder = String::new();
 
         let base_word = self.get_plural(item.amount, info, locale);
+        let amount_str = Self::format_value(item.amount);
+
         builder.push_str(&format!(
-            "{} {:.2}{} {}\n\n",
-            info.flag, item.amount, info.symbol, base_word
+            "{} {}{} {}\n\n",
+            info.flag, amount_str, info.symbol, base_word
         ));
 
         for target_code in targets {
@@ -421,8 +418,10 @@ impl CurrencyConverter {
             {
                 let converted = item.amount * from_rate / to_rate;
                 let target_word = self.get_plural(converted, target_info, locale);
+                let converted = Self::format_value(converted);
+
                 builder.push_str(&format!(
-                    "{} {:.2}{} {}\n",
+                    "{} {}{} {}\n",
                     target_info.flag, converted, target_info.symbol, target_word
                 ));
             }
@@ -432,6 +431,20 @@ impl CurrencyConverter {
             None
         } else {
             Some(builder.trim_end().to_string())
+        }
+    }
+
+    fn format_value(val: f64) -> String {
+        if val == 0.0 {
+            return "0.00".to_string();
+        }
+        if val < 0.01 {
+            format!("{:.14}", val)
+                .trim_end_matches('0')
+                .trim_end_matches('.')
+                .to_string()
+        } else {
+            format!("{:.2}", val)
         }
     }
 
@@ -450,12 +463,10 @@ impl CurrencyConverter {
             } else {
                 "many"
             }
+        } else if (amount - 1.0).abs() < f64::EPSILON {
+            "one"
         } else {
-            if (amount - 1.0).abs() < f64::EPSILON {
-                "one"
-            } else {
-                "many"
-            }
+            "many"
         };
 
         let key = format!("currencies.{}.{}", info.code, suffix);
@@ -501,7 +512,7 @@ pub fn get_all_currency_codes(path: String) -> Result<Vec<CurrencyStruct>, Conve
 
 pub fn get_default_currencies() -> Result<Vec<CurrencyStruct>, MyError> {
     let all = get_all_currency_codes(CURRENCY_CONFIG_PATH.to_string())
-        .map_err(|e| MyError::Other(e.to_string()))?;
+        .map_err(|e| BotError::Other(e.to_string()))?;
 
     let defaults = all
         .into_iter()

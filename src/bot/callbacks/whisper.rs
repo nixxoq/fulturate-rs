@@ -2,6 +2,7 @@ use crate::{
     bot::inlines::whisper::Whisper, core::config::Config, errors::MyError, t,
     util::i18n::get_locale_by_id,
 };
+use anyhow::anyhow;
 use teloxide::{
     Bot,
     payloads::{AnswerCallbackQuerySetters, EditMessageTextSetters},
@@ -15,7 +16,7 @@ pub async fn handle_whisper_callback(
     q: CallbackQuery,
     config: &Config,
 ) -> Result<(), MyError> {
-    let data = q.data.as_ref().ok_or("Callback query data is empty")?;
+    let data = q.data.as_ref().ok_or_else(|| anyhow!("Callback query data is empty"))?;
 
     let parts: Vec<&str> = data.split('_').collect();
     if parts.len() != 3 || parts[0] != "whisper" {
@@ -26,7 +27,7 @@ pub async fn handle_whisper_callback(
     let whisper_id = parts[2];
 
     let user = q.from.clone();
-    let locale = get_locale_by_id(user.id.0, &config).await;
+    let locale = get_locale_by_id(user.id.0, config).await;
 
     let redis_key = format!("whisper:{}", whisper_id);
 

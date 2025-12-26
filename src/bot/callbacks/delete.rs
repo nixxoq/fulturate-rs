@@ -53,7 +53,7 @@ pub async fn handle_delete_data(
     let Some(message) = query.message.as_ref() else {
         return Ok(());
     };
-    let locale = get_locale_by_id(query.from.id.0, &config).await;
+    let locale = get_locale_by_id(query.from.id.0, config).await;
 
     let can_delete = has_data_delete_permission(&bot, message.chat(), &query.from).await;
 
@@ -110,7 +110,7 @@ pub async fn handle_delete_request(
     let Some(data) = query.data.as_ref() else {
         return Ok(());
     };
-    let locale = get_locale_by_id(query.from.id.0, &config).await;
+    let locale = get_locale_by_id(query.from.id.0, config).await;
 
     let payload = data.strip_prefix("delete_msg:").unwrap_or_default();
     let parts: Vec<&str> = payload.split(':').collect();
@@ -186,7 +186,7 @@ pub async fn handle_delete_confirmation(
     let Some(data) = query.data.as_ref() else {
         return Ok(());
     };
-    let locale = get_locale_by_id(query.from.id.0, &config).await;
+    let locale = get_locale_by_id(query.from.id.0, config).await;
 
     let parts: Vec<&str> = data.split(':').collect();
     if parts.len() != 3 {
@@ -276,7 +276,7 @@ pub async fn handle_delete_data_confirmation(
     let Some(data) = query.data.as_ref() else {
         return Ok(());
     };
-    let locale = get_locale_by_id(query.from.id.0, &config).await;
+    let locale = get_locale_by_id(query.from.id.0, config).await;
 
     let parts: Vec<&str> = data
         .strip_prefix("delete_data_confirm:")

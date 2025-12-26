@@ -34,7 +34,7 @@ pub async fn handle_translate_callback(
     q: CallbackQuery,
     config: &Config,
 ) -> Result<(), MyError> {
-    let locale = get_locale_by_id(q.from.id.0, &config).await;
+    let locale = get_locale_by_id(q.from.id.0, config).await;
 
     if let (Some(data), Some(MaybeInaccessibleMessage::Regular(message))) = (&q.data, &q.message) {
         if let Some(author_id) = data

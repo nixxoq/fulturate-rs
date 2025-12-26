@@ -1,7 +1,7 @@
 use crate::{
     bot::modules::{Owner, registry::MOD_MANAGER},
     core::{config::Config, db::schemas::settings::Settings},
-    errors::MyError,
+    errors::{MyError, BotError},
     t,
     util::i18n::get_chat_locale,
 };
@@ -14,7 +14,7 @@ pub async fn settings_command_handler(
     message: Message,
     config: &Config,
 ) -> Result<(), MyError> {
-    let commander = message.from.as_ref().ok_or(MyError::UserNotFound)?;
+    let commander = message.from.as_ref().ok_or(BotError::UserNotFound)?;
     let commander_id = commander.id.0;
 
     let owner_id = message.chat.id.to_string();

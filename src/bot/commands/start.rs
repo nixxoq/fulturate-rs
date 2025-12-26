@@ -5,8 +5,8 @@ use crate::{
         db::schemas::{settings::Settings, user::User},
     },
     errors::MyError,
-    util::i18n::{get_chat_locale, normalize_lang_code},
     t,
+    util::i18n::{get_chat_locale, normalize_lang_code},
 };
 use mongodb::bson::doc;
 use oximod::Model;
@@ -29,26 +29,25 @@ pub async fn start_handler(
     if let Some(user) = user_opt {
         let user_tg_lang = normalize_lang_code(user.language_code.as_deref());
 
-        if message.chat.is_private() {
-            if User::find_one(doc! { "user_id": &user.id.to_string() })
+        if message.chat.is_private()
+            && User::find_one(doc! { "user_id": &user.id.to_string() })
                 .await?
                 .is_none()
-            {
-                is_new_user = true;
-                User::new().user_id(user.id.to_string()).save().await?;
+        {
+            is_new_user = true;
+            User::new().user_id(user.id.to_string()).save().await?;
 
-                let owner = Owner {
-                    id: user.id.to_string(),
-                    r#type: "user".to_string(),
-                };
+            let owner = Owner {
+                id: user.id.to_string(),
+                r#type: "user".to_string(),
+            };
 
-                println!(
-                    "Creating default settings for new user {} (lang: {})",
-                    user.id, &user_tg_lang
-                );
+            println!(
+                "Creating default settings for new user {} (lang: {})",
+                user.id, &user_tg_lang
+            );
 
-                Settings::create_with_defaults(&owner, user_tg_lang).await?;
-            }
+            Settings::create_with_defaults(&owner, user_tg_lang).await?;
         }
     }
 

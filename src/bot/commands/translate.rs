@@ -102,14 +102,14 @@ pub async fn translate_handler(
         return Ok(());
     };
 
-    if let Some(author) = replied_to_message.from.as_ref() {
-        if author.is_bot {
-            bot.send_message(msg.chat.id, t!("errors.reply_to_user", locale = &locale))
-                .reply_parameters(ReplyParameters::new(msg.id))
-                .parse_mode(ParseMode::Html)
-                .await?;
-            return Ok(());
-        }
+    if let Some(author) = replied_to_message.from.as_ref()
+        && author.is_bot
+    {
+        bot.send_message(msg.chat.id, t!("errors.reply_to_user", locale = &locale))
+            .reply_parameters(ReplyParameters::new(msg.id))
+            .parse_mode(ParseMode::Html)
+            .await?;
+        return Ok(());
     }
 
     let target_lang: String;

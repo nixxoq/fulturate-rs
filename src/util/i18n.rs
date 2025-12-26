@@ -32,15 +32,15 @@ pub fn load_locales() {
     if let Ok(entries) = fs::read_dir(path) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.extension().and_then(|s| s.to_str()) == Some("json") {
-                if let Some(file_stem) = path.file_stem().and_then(|s| s.to_str()) {
-                    let lang_code = file_stem.to_string();
-                    if let Ok(content) = fs::read_to_string(&path) {
-                        if let Ok(json) = serde_json::from_str::<Value>(&content) {
-                            println!("[LOCALE] Loaded: {}", lang_code);
-                            store.insert(lang_code, json);
-                        }
-                    }
+            if path.extension().and_then(|s| s.to_str()) == Some("json")
+                && let Some(file_stem) = path.file_stem().and_then(|s| s.to_str())
+            {
+                let lang_code = file_stem.to_string();
+                if let Ok(content) = fs::read_to_string(&path)
+                    && let Ok(json) = serde_json::from_str::<Value>(&content)
+                {
+                    println!("[LOCALE] Loaded: {}", lang_code);
+                    store.insert(lang_code, json);
                 }
             }
         }

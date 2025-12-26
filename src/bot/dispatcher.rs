@@ -37,9 +37,9 @@ use teloxide::{
     payloads::{AnswerInlineQuerySetters, SendDocumentSetters},
     prelude::{ChatId, Handler, Message, Requester},
     types::{
-        Chat, InlineKeyboardButton, InlineKeyboardMarkup, InlineQuery, InlineQueryResult,
+        InlineKeyboardButton, InlineKeyboardMarkup, InlineQuery, InlineQueryResult,
         InlineQueryResultArticle, InputFile, InputMessageContent, InputMessageContentText, Me,
-        MessageId, ParseMode, ThreadId, Update, User,
+        MessageId, ParseMode, ThreadId, Update,
     },
     update_listeners::Polling,
     utils::{command::BotCommands, html},
@@ -234,96 +234,44 @@ pub async fn run() -> Result<(), MyError> {
     Ok(())
 }
 
-fn extract_info(update: &Update) -> (Option<&User>, Option<&Chat>) {
-    match &update.kind {
-        teloxide::types::UpdateKind::Message(m) => (m.from.as_ref(), Some(&m.chat)),
-        teloxide::types::UpdateKind::CallbackQuery(q) => {
-            (Some(&q.from), q.message.as_ref().map(|m| m.chat()))
-        }
-        teloxide::types::UpdateKind::InlineQuery(q) => (Some(&q.from), None),
-        teloxide::types::UpdateKind::MyChatMember(m) => (Some(&m.from), Some(&m.chat)),
-        _ => (None, None),
-    }
-}
-
-fn short_error_name(error: &MyError) -> String {
-    format!("{}", error)
-}
-
 pub async fn handle_error(err: Arc<MyError>, update: Update, config: Arc<Config>, bot: Bot) {
-    error!("An error has occurred: {:?}", err);
-
-    let (user, chat) = extract_info(&update);
-    let mut message_text = String::new();
-
-    writeln!(&mut message_text, "🚨 <b>Новая ошибка!</b>\n").unwrap();
-
-    if let Some(chat) = chat {
-        let title = chat
-            .title()
-            .map_or("".to_string(), |t| format!(" ({})", html::escape(t)));
-        writeln!(
-            &mut message_text,
-            "<b>В чате:</b> <code>{}</code>{}",
-            chat.id, title
-        )
-        .unwrap();
-    } else {
-        writeln!(&mut message_text, "<b>В чате:</b> <i>(???)</i>").unwrap();
+    if format!("{:?}", err).contains("query is too old") {
+        return;
     }
 
-    if let Some(user) = user {
-        let username = user
-            .username
-            .as_ref()
-            .map_or("".to_string(), |u| format!(" (@{})", u));
-        let full_name = html::escape(&user.full_name());
-        writeln!(
-            &mut message_text,
-            "<b>Вызвал:</b> {} (<code>{}</code>){}",
-            full_name, user.id, username
-        )
-        .unwrap();
-    } else {
-        writeln!(&mut message_text, "<b>Вызвал:</b> <i>(???)</i>").unwrap();
+    error!("Error: {:#}", err);
+
+    let mut file_content = String::new();
+    writeln!(&mut file_content, "Error chain").unwrap();
+    for (i, cause) in err.chain().enumerate() {
+        writeln!(&mut file_content, "{}. {}", i, cause).unwrap();
     }
 
-    let error_name = short_error_name(&err);
-    writeln!(
-        &mut message_text,
-        "\n<b>Ошибка:</b>\n<blockquote expandable>{}</blockquote>",
-        html::escape(&error_name)
-    )
-    .unwrap();
+    writeln!(&mut file_content, "\nDebug info:").unwrap();
+    writeln!(&mut file_content, "{:#?}", err).unwrap();
 
-    let hashtag = "#error";
-    writeln!(&mut message_text, "\n{}", hashtag).unwrap();
+    writeln!(&mut file_content, "\nUpdate context (from teloxide)").unwrap();
+    writeln!(&mut file_content, "{:#?}", update).unwrap();
 
-    let full_error_text = format!("{:#?}", err);
-    let document = InputFile::memory(full_error_text.into_bytes()).file_name("error_details.txt");
+    let document = InputFile::memory(file_content.into_bytes()).file_name("crash_report.txt");
 
-    if let (Ok(log_chat_id), Ok(error_thread_id)) = (
+    let message_text = format!(
+        "🚨 <b>Ошибка бота</b>\n\nПричина: <code>{}</code>\n\n#error",
+        html::escape(&err.to_string())
+    );
+
+    if let (Ok(chat_id), Ok(thread_id)) = (
         config.get_log_chat_id().parse::<i64>(),
         config.get_error_chat_thread_id().parse::<i32>(),
     ) {
-        let chat_id = ChatId(log_chat_id);
-
-        match bot
-            .send_document(chat_id, document)
+        let _ = bot
+            .send_document(ChatId(chat_id), document)
             .caption(message_text)
             .parse_mode(ParseMode::Html)
+            .message_thread_id(ThreadId(MessageId(thread_id)))
             .reply_markup(delete_message_button_no_confirm(72))
-            .message_thread_id(ThreadId(MessageId(error_thread_id)))
-            .await
-        {
-            Ok(_) => info!("Error report sent successfully to chat {}", log_chat_id),
-            Err(e) => error!("Failed to send error report to chat {}: {}", log_chat_id, e),
-        }
+            .await;
     } else {
-        error!(
-            "LOG_CHAT_ID ({}) or ERROR_CHAT_THREAD_ID ({}) is not a valid integer",
-            config.get_log_chat_id(),
-            config.get_error_chat_thread_id()
-        );
+        error!("Config error: invalid LOG_CHAT_ID or ERROR_CHAT_THREAD_ID");
     }
 }

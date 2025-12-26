@@ -166,3 +166,12 @@ where
             .map_err(|e| OxiModError::IndexError(format!("DB Count Error: {}", e)))
     }
 }
+
+impl<T> Default for QueryBuilder<T>
+where
+    T: Model + for<'de> Deserialize<'de> + Send + Sync + Unpin,
+{
+    fn default() -> Self {
+        Self::new()
+    }
+}

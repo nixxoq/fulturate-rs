@@ -7,10 +7,11 @@ use crate::{
         modules::{Owner, speech_recognition::SpeechRecognitionSettings},
     },
     core::{config::Config, db::schemas::settings::Settings as DbSettings},
-    errors::MyError,
+    errors::{BotError, MyError},
     t,
     util::{enums::AudioStruct, i18n::get_chat_locale, split_text},
 };
+use anyhow::anyhow;
 use bytes::Bytes;
 use gem_rs::{
     api::Models,
@@ -54,7 +55,7 @@ pub async fn pagination_handler(
     let Some(data) = query.data.as_ref() else {
         return Ok(());
     };
-    let locale = get_chat_locale(&message.chat, &config).await;
+    let locale = get_chat_locale(&message.chat, config).await;
 
     let parts: Vec<&str> = data.split(':').collect();
     if parts.len() != 3 || parts[1] != "page" {
@@ -376,7 +377,7 @@ async fn get_cached(
     let processed_parts = transcription.to_text(locale).await;
     if processed_parts.is_empty() || processed_parts[0].contains("❌") {
         let error_message = processed_parts.first().cloned().unwrap_or_default();
-        return Err(MyError::Other(error_message));
+        return Err(BotError::Other(error_message).into());
     }
 
     let full_text = processed_parts.join("\n\n");
@@ -741,7 +742,7 @@ pub async fn summarize_audio(
             Some(Duration::from_secs(180)),
         )
         .await
-        .map_err(|e| MyError::from(e))?;
+        .map_err(MyError::from)?;
 
     let mut client = GemSession::Builder()
         .model(Models::Custom(model))
@@ -756,7 +757,7 @@ pub async fn summarize_audio(
             &settings,
         )
         .await
-        .map_err(|e| MyError::from(e))?;
+        .map_err(MyError::from)?;
 
     Ok(response
         .get_results()
@@ -796,10 +797,10 @@ pub async fn save_file_to_memory(
 ) -> Result<Bytes, MyError> {
     let file = bot.get_file(FileId(file_id.to_string())).send().await?;
 
-    if std::path::Path::new(&file.path).exists() {
-        if let Ok(bytes) = std::fs::read(&file.path) {
-            return Ok(Bytes::from(bytes));
-        }
+    if std::path::Path::new(&file.path).exists()
+        && let Ok(bytes) = std::fs::read(&file.path)
+    {
+        return Ok(Bytes::from(bytes));
     }
 
     let token = bot.token();
@@ -819,7 +820,7 @@ pub async fn save_file_to_memory(
     let response = reqwest::get(&file_url).await?;
 
     if !response.status().is_success() {
-        return Err(MyError::Other(format!("HTTP Error: {}", response.status())));
+        return Err(anyhow!("HTTP Error: {}", response.status()));
     }
 
     Ok(response.bytes().await?)
