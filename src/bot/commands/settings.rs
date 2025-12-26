@@ -1,13 +1,13 @@
+use crate::util::i18n::get_available_locales;
 use crate::{
     bot::modules::{Owner, registry::MOD_MANAGER},
     core::{config::Config, db::schemas::settings::Settings},
-    errors::{MyError, BotError},
+    errors::{BotError, MyError},
     t,
     util::i18n::get_chat_locale,
 };
 use teloxide::prelude::*;
 use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup};
-use crate::util::i18n::get_available_locales;
 
 pub async fn settings_command_handler(
     bot: Bot,
@@ -124,16 +124,20 @@ pub async fn get_modules_settings_menu(
         .get_designed_modules(owner_type)
         .into_iter()
         .map(|module| {
-            let settings: serde_json::Value = settings_doc
-                .modules
-                .get(module.key())
-                .cloned()
-                .unwrap_or_default();
-
-            let is_enabled = settings
-                .get("enabled")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
+            let is_enabled = if let Some(json_val) = settings_doc.modules.get(module.key()) {
+                json_val
+                    .get("enabled")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false)
+            } else {
+                match module.factory_settings() {
+                    Ok(default_json) => default_json
+                        .get("enabled")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false),
+                    Err(_) => false,
+                }
+            };
 
             let key = format!("modules.{}.name", module.key());
             let tr = t!(&key, locale = locale);
