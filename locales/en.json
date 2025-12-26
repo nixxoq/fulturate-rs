@@ -25,7 +25,8 @@
     "invalid_id": "❌ Error: Invalid ID.",
     "reply_to_translate": "Reply to the <b>message</b> you want to translate.",
     "reply_to_text": "Reply to a message <b>with text</b>.",
-    "reply_to_user": "Reply to a message from a user."
+    "reply_to_user": "Reply to a message from a user.",
+    "reply_to_voice": "You must reply to a voice message."
   },
   "start": {
     "welcome_new": "<b>Welcome!</b> 👋\n\nI am Fulturate — your multifunctional assistant. Use the /settings command to explore features and configure me.\n\n",
