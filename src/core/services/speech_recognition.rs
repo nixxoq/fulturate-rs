@@ -853,6 +853,8 @@ impl Transcription {
             Err(e) => return vec![format!("❌ Ошибка загрузки файла: {}", e)],
         };
 
+        println!("URL: {:#?}", self.config.get_gemini_base_url());
+
         let mut client = GemSession::Builder()
             .base_url(self.config.get_gemini_base_url())
             .model(Models::Custom(self.custom_model.to_string()))
