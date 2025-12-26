@@ -6,7 +6,7 @@ services:
     networks:
       - fulturate-net
     volumes:
-      - redis-data:/data/redis
+      - redis_data:/data
 
   mongo:
     image: mongo:latest
@@ -15,7 +15,7 @@ services:
     networks:
       - fulturate-net
     volumes:
-      - mongo-data:/data/db
+      - mongo_data:/data/db
 
   telegram_api:
     image: aiogram/telegram-bot-api:latest
@@ -23,8 +23,8 @@ services:
     restart: unless-stopped
     networks:
       - fulturate-net
-    ports:
-      - "8081:8081"
+#    ports:
+#      - "8081:8081"
     env_file:
       - .env
     environment:
@@ -32,7 +32,7 @@ services:
       - TELEGRAM_API_ID=28090001
       - TELEGRAM_API_HASH=a38cfe08329526d8cb130acbdddacbbd
     volumes:
-      - ./data/telegram-bot-api:/var/lib/telegram-bot-api
+      - telegram_bot_api_data:/var/lib/telegram-bot-api
 
   fulturate:
     build:
@@ -54,13 +54,25 @@ services:
       - .:/app
       - cargo-cache:/usr/local/cargo/registry
       - target-cache:/app/target
-    command: cargo run --bin fulturate
+      - telegram_bot_api_data:/var/lib/telegram-bot-api
+    command: >
+      sh -c '
+      if [ "$RELEASE" = "1" ]; then
+        echo "Release"
+        exec cargo run --release --bin fulturate
+      else
+        echo "Debug"
+        exec cargo run --bin fulturate
+        fi
+      '
 
 volumes:
   cargo-cache:
   target-cache:
-  mongo-data:
-  redis-data:
+  mongo_data:
+  redis_data:
+  telegram_bot_api_data:
+    driver: local
 
 
 networks:

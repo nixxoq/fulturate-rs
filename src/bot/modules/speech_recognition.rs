@@ -30,7 +30,7 @@ impl SpeechModel {
     pub fn api_key(&self) -> &str {
         match self {
             Self::Gemini25Flash => "gemini-2.5-flash",
-            Self::Gemini3Flash => "gemini-3-flash",
+            Self::Gemini3Flash => "gemini-3-flash-preview",
             Self::Gemini25Pro => "gemini-2.5-pro",
         }
     }

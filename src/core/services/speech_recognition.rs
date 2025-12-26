@@ -746,6 +746,7 @@ pub async fn summarize_audio(
         .map_err(MyError::from)?;
 
     let mut client = GemSession::Builder()
+        .base_url(config.get_gemini_base_url())
         .model(Models::Custom(model))
         .timeout(Some(Duration::from_secs(120)))
         .build();
@@ -853,6 +854,7 @@ impl Transcription {
         };
 
         let mut client = GemSession::Builder()
+            .base_url(self.config.get_gemini_base_url())
             .model(Models::Custom(self.custom_model.to_string()))
             .timeout(Some(Duration::from_secs(120)))
             .build();
