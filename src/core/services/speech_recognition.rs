@@ -733,7 +733,8 @@ pub async fn summarize_audio(
     };
     settings.set_system_instruction(&prompt);
 
-    let file_manager = FileManager::new();
+    let mut file_manager = FileManager::new();
+    file_manager.set_base_url(config.get_gemini_base_url());
 
     let file_data = file_manager
         .add_file_from_bytes(
@@ -838,7 +839,8 @@ impl Transcription {
         let prompt = self.config.get_json_config().get_ai_prompt().to_owned();
         settings.set_system_instruction(&prompt);
 
-        let file_manager = FileManager::new();
+        let mut file_manager = FileManager::new();
+        file_manager.set_base_url(self.config.get_gemini_base_url());
 
         let file_data = match file_manager
             .add_file_from_bytes(
@@ -850,10 +852,10 @@ impl Transcription {
             .await
         {
             Ok(fd) => fd,
-            Err(e) => return vec![format!("❌ Ошибка загрузки файла: {}", e)],
+            Err(e) => {
+                return vec![format!("❌ Ошибка загрузки файла: {}", e)];
+            }
         };
-
-        println!("URL: {:#?}", self.config.get_gemini_base_url());
 
         let mut client = GemSession::Builder()
             .base_url(self.config.get_gemini_base_url())
