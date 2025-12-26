@@ -3,20 +3,13 @@
   <h1>Fulturate-rs - Best utility bot for Telegram on Rust 🤖</h1>
 </div>
 
-## ✨ Features:
-- **Speech Recognition** 🎤: Convert spoken words into text for a more interactive experience.
-- **Currency Conversion** 💰: Convert between different currencies easily.
-- **Summarization** ✨: Summarize audio files.
-
 ## 🚀 Getting Started:
 To get started with Fulturate-rs, follow these steps:  
 *(If you don't have Rust installed, visit: [Rust Install](https://www.rust-lang.org/tools/install))*
 
 1. Clone the repository:  
-   `git clone https://github.com/Fulturate/bot.git`
-2. Run the bot:  
-   `cargo run`  
-   OR run with Docker:  
+   `git clone https://github.com/Fulturate/code.git`
+2. Run with Docker:  
    `docker-compose up -d`
 
 ## 🔗 Links:
@@ -28,4 +21,4 @@ To get started with Fulturate-rs, follow these steps:
 - **Nixxoq (did a LOT of work)**: [GitHub](https://github.com/nixxoq), [Telegram](https://t.me/nixxoq)
 
 ## 📄 License:
-- **MIT License**: [MIT License](https://github.com/Fulturate/bot/blob/main/LICENSE)
+- **MIT License**: [MIT License](https://github.com/Fulturate/code/blob/main/LICENSE)
