@@ -20,6 +20,7 @@ use gem_rs::{
 };
 use log::{debug, error, info};
 use redis_macros::{FromRedisValue, ToRedisArgs};
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use teloxide::{
@@ -880,11 +881,20 @@ impl Transcription {
                 Err(error) => {
                     attempts += 1;
                     let error_string = error.to_string();
-                    if error_string == last_error {
+                    error!(
+                        "Transcription error (attempt {}): {:?}",
+                        attempts, error_string
+                    );
+
+                    let re = Regex::new(r"https?://[^\s)]+").unwrap();
+                    let safe_error = re
+                        .replace_all(&error_string, "<code>[Gemini URL]</code>")
+                        .to_string();
+
+                    if safe_error == last_error {
                         continue;
                     }
-                    last_error = error_string;
-                    error!("Transcription error (attempt {}): {:?}", attempts, error);
+                    last_error = safe_error;
                 }
             }
         }
