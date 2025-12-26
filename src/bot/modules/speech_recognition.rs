@@ -2,8 +2,8 @@ use crate::{
     bot::modules::{Module, ModuleSettings, Owner},
     core::{config::Config, db::schemas::settings::Settings},
     errors::MyError,
-    util::i18n::get_locale_by_owner,
     t,
+    util::i18n::get_locale_by_owner,
 };
 use serde::{Deserialize, Serialize};
 use teloxide::{
@@ -15,12 +15,14 @@ use teloxide::{
 pub enum SpeechModel {
     Gemini25Flash,
     Gemini25Pro,
+    Gemini3Flash,
 }
 
 impl SpeechModel {
     pub fn display_name(&self) -> &str {
         match self {
             Self::Gemini25Flash => "Gemini 2.5 Flash",
+            Self::Gemini3Flash => "Gemini 3 Flash",
             Self::Gemini25Pro => "Gemini 2.5 Pro",
         }
     }
@@ -28,6 +30,7 @@ impl SpeechModel {
     pub fn api_key(&self) -> &str {
         match self {
             Self::Gemini25Flash => "gemini-2.5-flash",
+            Self::Gemini3Flash => "gemini-3-flash",
             Self::Gemini25Pro => "gemini-2.5-pro",
         }
     }
@@ -35,6 +38,7 @@ impl SpeechModel {
     fn from_str(s: &str) -> Self {
         match s {
             "Gemini 2.5 Pro" => Self::Gemini25Pro,
+            "Gemini 3 Flash" => Self::Gemini3Flash,
             _ => Self::Gemini25Flash,
         }
     }
@@ -248,7 +252,11 @@ impl SpeechRecognitionModule {
         let config = Config::new().await;
         let locale = get_locale_by_owner(&owner.id, &owner.r#type, &config).await;
 
-        let models = [SpeechModel::Gemini25Flash, SpeechModel::Gemini25Pro];
+        let models = [
+            SpeechModel::Gemini25Flash,
+            SpeechModel::Gemini25Pro,
+            SpeechModel::Gemini3Flash,
+        ];
 
         let trans_lbl = t!("modules.speech.transcription", locale = &locale);
         let sum_lbl = t!("modules.speech.summary", locale = &locale);
