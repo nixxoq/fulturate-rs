@@ -6,7 +6,7 @@ services:
     networks:
       - fulturate-net
     volumes:
-      - ./data/redis:/data
+      - redis-data:/data/redis
 
   mongo:
     image: mongo:latest
@@ -60,6 +60,7 @@ volumes:
   cargo-cache:
   target-cache:
   mongo-data:
+  redis-data:
 
 
 networks:
