@@ -23,8 +23,8 @@ use teloxide::{
     prelude::*,
     types::{
         ChatId, ChosenInlineResult, FileId, InlineQuery, InlineQueryResult,
-        InlineQueryResultArticle, InlineQueryResultPhoto, InputFile, InputMedia, InputMediaVideo,
-        InputMessageContent, InputMessageContentText,
+        InlineQueryResultArticle, InlineQueryResultPhoto, InputFile, InputMedia, InputMediaAudio,
+        InputMediaVideo, InputMessageContent, InputMessageContentText,
     },
 };
 use tokio::fs;
@@ -57,6 +57,7 @@ mod video_metadata {
         pub width: u32,
         pub height: u32,
         pub thumbnail_url: Option<String>,
+        pub title: Option<String>,
     }
 
     #[derive(Deserialize)]
@@ -65,6 +66,7 @@ mod video_metadata {
         width: Option<u32>,
         height: Option<u32>,
         thumbnail: Option<String>,
+        title: Option<String>,
     }
 
     pub async fn get_from_url(url: &str) -> Result<VideoMetadata, MyError> {
@@ -76,7 +78,6 @@ mod video_metadata {
         if !ytdlp_output.status.success() {
             let stderr = String::from_utf8_lossy(&ytdlp_output.stderr);
             log::error!("yt-dlp failed for URL '{}'. Stderr: {}", url, stderr);
-            // return Err("Failed to execute yt-dlp".into());
             return Err(anyhow::anyhow!("Failed to execute yt-dlp"));
         }
 
@@ -86,6 +87,7 @@ mod video_metadata {
             width: metadata.width.unwrap_or(0),
             height: metadata.height.unwrap_or(0),
             thumbnail_url: metadata.thumbnail,
+            title: metadata.title,
         })
     }
 
@@ -241,7 +243,11 @@ pub async fn handle_cobalt_inline(
                         minutes = minutes
                     ))),
                 )
-                .description(format!("Максимальная длительность: {} минут", minutes));
+                .description(t!(
+                    "modules.cobalt.error_too_long",
+                    locale = &locale,
+                    minutes = minutes
+                ));
                 bot.answer_inline_query(q.id, vec![error_article.into()])
                     .await?;
                 return Ok(());
@@ -301,13 +307,18 @@ pub async fn handle_inline_video(
     let cache_key = format!("cobalt_cache:{}", url_hash);
     let cached_data = redis.get::<CobaltCache>(&cache_key).await?;
 
-    let (file_id, original_url, thumb_file_id) = match cached_data {
+    let (file_id, original_url, thumb_file_id, is_audio) = match cached_data {
         Some(CobaltCache::Ready {
             file_id,
             original_url,
             thumb_file_id,
+            width,
+            height,
             ..
-        }) => (file_id, original_url, thumb_file_id),
+        }) => {
+            let is_audio = width == 0 && height == 0;
+            (file_id, original_url, thumb_file_id, is_audio)
+        }
         Some(CobaltCache::Pending(DownloadResult::Video {
             url: _video_url,
             original_url,
@@ -363,7 +374,6 @@ pub async fn handle_inline_video(
                 .get_download_url()
                 .ok_or_else(|| anyhow!("Cobalt returned no download URL (Picker or Error?)"))?;
 
-            let video_path = temp_dir.join(format!("{}.mp4", url_hash));
             let http_client = reqwest::Client::builder()
                 .user_agent(
                     "Fulturate/6.6.6 (rust) (+https://github.com/weever1337/fulturate-rs)"
@@ -372,22 +382,51 @@ pub async fn handle_inline_video(
                 .timeout(std::time::Duration::from_secs(600))
                 .build()?;
 
-            let mut attempts = 0;
-            let mut success = false;
-            let mut last_error = String::new();
+            let (mut attempts, mut success, mut last_error, mut is_audio, mut path) = (
+                0,
+                false,
+                String::new(),
+                false,
+                temp_dir.join(format!("{}.mp4", url_hash)),
+            );
 
             while attempts < 3 {
                 attempts += 1;
                 match http_client.get(&download_url).send().await {
                     Ok(resp) => {
                         if resp.status().is_success() {
+                            if let Some(cd) =
+                                resp.headers().get(reqwest::header::CONTENT_DISPOSITION)
+                            {
+                                let cd_str = cd.to_str().unwrap_or("").to_lowercase();
+                                if cd_str.contains(".mp3")
+                                    || cd_str.contains(".ogg")
+                                    || cd_str.contains(".wav")
+                                    || cd_str.contains(".m4a")
+                                {
+                                    is_audio = true;
+                                    path = temp_dir.join(format!("{}.mp3", url_hash));
+                                }
+                            }
+
+                            if !is_audio {
+                                if let Some(ct) = resp.headers().get(reqwest::header::CONTENT_TYPE)
+                                {
+                                    let ct_str = ct.to_str().unwrap_or("");
+                                    if ct_str.contains("audio/") {
+                                        is_audio = true;
+                                        path = temp_dir.join(format!("{}.mp3", url_hash));
+                                    }
+                                }
+                            }
+
                             let content = resp.bytes().await?;
                             if !content.is_empty() {
-                                fs::write(&video_path, content).await?;
+                                fs::write(&path, content).await?;
                                 success = true;
                                 break;
                             } else {
-                                last_error = "File is empty (0 bytes)".into();
+                                last_error = "File is empty".into();
                             }
                         } else {
                             last_error = format!("HTTP {}", resp.status());
@@ -412,63 +451,84 @@ pub async fn handle_inline_video(
                 return Ok(());
             }
 
-            let _video_guard = TempGuard {
-                path: video_path.clone(),
-            };
+            let _guard = TempGuard { path: path.clone() };
 
             let upload_client = reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(5 * 60))
+                .timeout(std::time::Duration::from_secs(3600))
                 .connect_timeout(std::time::Duration::from_secs(60))
                 .build()?;
 
             let uploader = Bot::with_client(bot.token(), upload_client).set_api_url(bot.api_url());
 
-            let mut video_msg = uploader
-                .send_video(trash_channel, InputFile::file(&video_path))
-                .duration(meta.duration)
-                .width(meta.width)
-                .height(meta.height);
+            let sent_msg = if is_audio {
+                let mut audio_msg = uploader.send_audio(trash_channel, InputFile::file(&path));
 
-            if let Some((path, _guard)) = &thumb_data {
-                video_msg = video_msg.thumbnail(InputFile::file(path));
-            }
+                if let Some(title) = &meta.title {
+                    audio_msg = audio_msg.title(title);
+                }
+                audio_msg = audio_msg.duration(meta.duration);
+                if let Some((path, _)) = &thumb_data {
+                    audio_msg = audio_msg.thumbnail(InputFile::file(path));
+                }
 
-            let video_msg = video_msg.await?;
+                audio_msg.await?
+            } else {
+                let mut video_msg = uploader
+                    .send_video(trash_channel, InputFile::file(&path))
+                    .duration(meta.duration)
+                    .width(meta.width)
+                    .height(meta.height);
 
-            let video = video_msg
-                .video()
-                .ok_or_else(|| anyhow!("Failed to get video from message"))?;
-            let file_id = video.file.id.clone();
+                if let Some((path, _)) = &thumb_data {
+                    video_msg = video_msg.thumbnail(InputFile::file(path));
+                }
 
-            let thumb_id = video
-                .thumbnail
-                .as_ref()
-                .map(|p| p.file.id.clone())
-                .unwrap_or_default();
+                video_msg.await?
+            };
+
+            let (file_id, thumb_id) = if let Some(audio) = sent_msg.audio() {
+                (
+                    audio.file.id.clone(),
+                    audio
+                        .thumbnail
+                        .as_ref()
+                        .map(|t| t.file.id.clone())
+                        .unwrap_or_default(),
+                )
+            } else if let Some(video) = sent_msg.video() {
+                (
+                    video.file.id.clone(),
+                    video
+                        .thumbnail
+                        .as_ref()
+                        .map(|t| t.file.id.clone())
+                        .unwrap_or_default(),
+                )
+            } else if let Some(doc) = sent_msg.document() {
+                (
+                    doc.file.id.clone(),
+                    doc.thumbnail
+                        .as_ref()
+                        .map(|t| t.file.id.clone())
+                        .unwrap_or_default(),
+                )
+            } else {
+                return Err(anyhow!("Sent message does not contain supported media"));
+            };
 
             let ready_cache = CobaltCache::Ready {
-                file_id: file_id.to_string(),
+                file_id: file_id.clone().to_string(),
                 original_url: original_url.clone(),
                 duration: meta.duration,
-                width: meta.width,
-                height: meta.height,
-                thumb_file_id: thumb_id.to_string(),
+                width: if is_audio { 0 } else { meta.width },
+                height: if is_audio { 0 } else { meta.height },
+                thumb_file_id: thumb_id.clone().to_string(),
             };
             redis
                 .set(&cache_key, &ready_cache, 365 * 24 * 60 * 60)
                 .await?;
 
-            let ret_thumb = if thumb_id.0.is_empty() {
-                None
-            } else {
-                Some(thumb_id)
-            };
-
-            (
-                file_id.to_string(),
-                original_url,
-                ret_thumb.unwrap_or_default().to_string(),
-            )
+            (file_id.0, original_url, thumb_id.0, is_audio)
         }
         _ => {
             bot.edit_message_text_inline(
@@ -480,25 +540,42 @@ pub async fn handle_inline_video(
         }
     };
 
-    let mut media = InputMediaVideo::new(InputFile::file_id(FileId::from(file_id)));
-
-    if !thumb_file_id.is_empty() {
-        media = media.thumbnail(InputFile::file_id(FileId::from(thumb_file_id)));
-    }
-
     let url_kb = make_single_url_keyboard(&original_url);
 
-    if let Err(e) = bot
-        .edit_message_media_inline(&inline_message_id, InputMedia::Video(media))
-        .reply_markup(url_kb)
-        .await
-    {
-        log::error!("Failed to send video with file_id: {:?}", e);
-        bot.edit_message_text_inline(
-            inline_message_id,
-            t!("modules.cobalt.send_error", locale = &locale),
-        )
-        .await?;
+    if is_audio {
+        let mut media = InputMediaAudio::new(InputFile::file_id(FileId::from(file_id)));
+        if !thumb_file_id.is_empty() {
+            media = media.thumbnail(InputFile::file_id(FileId::from(thumb_file_id)));
+        }
+        if let Err(e) = bot
+            .edit_message_media_inline(&inline_message_id, InputMedia::Audio(media))
+            .reply_markup(url_kb)
+            .await
+        {
+            log::error!("Failed to edit inline audio: {:?}", e);
+            bot.edit_message_text_inline(
+                inline_message_id,
+                t!("modules.cobalt.send_error", locale = &locale),
+            )
+            .await?;
+        }
+    } else {
+        let mut media = InputMediaVideo::new(InputFile::file_id(FileId::from(file_id)));
+        if !thumb_file_id.is_empty() {
+            media = media.thumbnail(InputFile::file_id(FileId::from(thumb_file_id)));
+        }
+        if let Err(e) = bot
+            .edit_message_media_inline(&inline_message_id, InputMedia::Video(media))
+            .reply_markup(url_kb)
+            .await
+        {
+            log::error!("Failed to edit inline video: {:?}", e);
+            bot.edit_message_text_inline(
+                inline_message_id,
+                t!("modules.cobalt.send_error", locale = &locale),
+            )
+            .await?;
+        }
     }
 
     Ok(())
