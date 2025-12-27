@@ -28,6 +28,7 @@ pub struct Config {
     redis_client: RedisCache,
     telegram_api: String,
     gemini_base_url: String,
+    trash_channel_id: String,
 }
 
 impl Config {
@@ -39,8 +40,9 @@ impl Config {
             error!("Expected BOT_TOKEN env var");
             std::process::exit(1);
         };
-        let Ok(cobalt_api_key) = std::env::var("COBALT_API_KEY") else {
-            error!("COBALT_API_KEY expected");
+
+        let Ok(cobalt_base_api) = std::env::var("COBALT_BASE_API") else {
+            error!("COBALT_BASE_API expected");
             std::process::exit(1);
         };
 
@@ -52,21 +54,30 @@ impl Config {
         let url = reqwest::Url::parse(&telegram_api_url).unwrap();
         let bot = Bot::new(bot_token).set_api_url(url);
 
-        let cobalt_client = ccobalt::Client::builder()
-            .base_url("https://cobalt-backend.canine.tools/")
+        let mut cobalt_client = ccobalt::Client::builder()
+            .base_url(cobalt_base_api)
+            // .base_url("https://cobalt-backend.canine.tools/")
             // .base_url("http://127.0.0.1:9000")
             // .base_url("https://nixxo.local/")
             // .no_api_key(true)
-            .api_key(cobalt_api_key)
-            // .api_key("ea4837b1-a06f-48b8-af62-0a7c263a2e18")
+            // .api_key(cobalt_api_key)
             .user_agent(
                 "Fulturate/6.6.6 (rust) (+https://github.com/weever1337/fulturate-rs)".to_string(),
-            )
-            .build()
-            .unwrap_or_else(|_err| {
-                error!("Failed to build cobalt client");
-                std::process::exit(1);
-            });
+            );
+
+        match std::env::var("COBALT_API_KEY") {
+            Ok(key) if !key.is_empty() => {
+                cobalt_client = cobalt_client.api_key(key);
+            }
+            _ => {
+                cobalt_client = cobalt_client.no_api_key(true);
+            }
+        }
+
+        let cobalt_client = cobalt_client.build().unwrap_or_else(|_err| {
+            error!("Failed to build cobalt client");
+            std::process::exit(1);
+        });
 
         let owners: Vec<String> = std::env::var("OWNERS")
             .unwrap_or_else(|_| {
@@ -115,6 +126,11 @@ impl Config {
         let gemini_base_url =
             std::env::var("GEMINI_BASE_URL").unwrap_or(DEFAULT_BASE_URL.to_string());
 
+        let Ok(trash_channel_id) = std::env::var("TRASH_CHANNEL_ID") else {
+            error!("TRASH_CHANNEL_ID expected");
+            std::process::exit(1);
+        };
+
         Config {
             bot,
             cobalt_client,
@@ -129,6 +145,7 @@ impl Config {
             redis_client,
             telegram_api: telegram_api_url,
             gemini_base_url,
+            trash_channel_id,
         }
     }
 
@@ -151,6 +168,10 @@ impl Config {
 
     pub fn get_log_chat_id(&self) -> &str {
         &self.log_chat_id
+    }
+
+    pub fn get_trash_channel_id(&self) -> &str {
+        &self.trash_channel_id
     }
 
     pub fn get_error_chat_thread_id(&self) -> &str {

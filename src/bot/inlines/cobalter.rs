@@ -46,8 +46,8 @@ impl Drop for TempGuard {
 
 mod video_metadata {
     use super::{MyError, TempGuard};
-    use serde::Deserialize;
     use anyhow::Context;
+    use serde::Deserialize;
     use std::path::{Path, PathBuf};
     use tokio::process::Command;
 
@@ -99,8 +99,8 @@ mod video_metadata {
 
         let path_clone = thumb_path.clone();
         tokio::task::spawn_blocking(move || -> Result<(), MyError> {
-            let img = image::load_from_memory(&response)
-                .context("Failed to load image from memory")?;
+            let img =
+                image::load_from_memory(&response).context("Failed to load image from memory")?;
             let scaled = img.resize(320, 320, image::imageops::FilterType::Lanczos3);
 
             scaled
@@ -331,7 +331,7 @@ pub async fn handle_inline_video(
             )
             .await?;
 
-            let log_channel_id = ChatId(config.get_log_chat_id().parse()?);
+            let trash_channel = ChatId(config.get_trash_channel_id().parse()?);
 
             let owner = Owner {
                 id: chosen.from.id.to_string(),
@@ -357,15 +357,74 @@ pub async fn handle_inline_video(
             };
 
             let client = config.get_cobalt_client();
-            let video_path = client
-                .download_and_save(&cobalt_req, url_hash, &temp_dir.to_string_lossy())
+
+            let response = client.resolve_download(&cobalt_req).await?;
+            let download_url = response
+                .get_download_url()
+                .ok_or_else(|| anyhow!("Cobalt returned no download URL (Picker or Error?)"))?;
+
+            let video_path = temp_dir.join(format!("{}.mp4", url_hash));
+            let http_client = reqwest::Client::builder()
+                .user_agent(
+                    "Fulturate/6.6.6 (rust) (+https://github.com/weever1337/fulturate-rs)"
+                        .to_string(),
+                )
+                .timeout(std::time::Duration::from_secs(600))
+                .build()?;
+
+            let mut attempts = 0;
+            let mut success = false;
+            let mut last_error = String::new();
+
+            while attempts < 3 {
+                attempts += 1;
+                match http_client.get(&download_url).send().await {
+                    Ok(resp) => {
+                        if resp.status().is_success() {
+                            let content = resp.bytes().await?;
+                            if !content.is_empty() {
+                                fs::write(&video_path, content).await?;
+                                success = true;
+                                break;
+                            } else {
+                                last_error = "File is empty (0 bytes)".into();
+                            }
+                        } else {
+                            last_error = format!("HTTP {}", resp.status());
+                            if !resp.status().is_server_error() {
+                                break;
+                            }
+                        }
+                    }
+                    Err(e) => last_error = e.to_string(),
+                }
+                if !success && attempts < 3 {
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                }
+            }
+
+            if !success {
+                bot.edit_message_text_inline(
+                    &inline_message_id,
+                    format!("❌ Download Failed: {}", last_error),
+                )
                 .await?;
+                return Ok(());
+            }
+
             let _video_guard = TempGuard {
                 path: video_path.clone(),
             };
 
-            let mut video_msg = bot
-                .send_video(log_channel_id, InputFile::file(&video_path))
+            let upload_client = reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(5 * 60))
+                .connect_timeout(std::time::Duration::from_secs(60))
+                .build()?;
+
+            let uploader = Bot::with_client(bot.token(), upload_client).set_api_url(bot.api_url());
+
+            let mut video_msg = uploader
+                .send_video(trash_channel, InputFile::file(&video_path))
                 .duration(meta.duration)
                 .width(meta.width)
                 .height(meta.height);
