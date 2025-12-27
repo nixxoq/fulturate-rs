@@ -11,11 +11,11 @@ use crate::{
         },
     },
     errors::MyError,
+    t,
     util::{
         i18n::get_locale_by_owner,
         paginator::{ItemsBuild, Paginator},
     },
-    t,
 };
 use serde::{Deserialize, Serialize};
 use teloxide::{
@@ -189,7 +189,9 @@ impl CurrencyModule {
             .current_page(page)
             .add_bottom_row(vec![back_btn])
             .set_callback_prefix(format!("{}:settings", self.key()))
-            .set_callback_formatter(move |p| format!("{}:settings:page:{}", self.key(), p))
+            .set_callback_formatter(move |p| {
+                format!("{}:settings:page:{}:{}", self.key(), p, commander_id)
+            })
             .build(|currency| {
                 let is_selected = settings.selected_codes.contains(&currency.code);
                 let icon = if is_selected { "✅" } else { "❌" };
@@ -204,7 +206,12 @@ impl CurrencyModule {
     }
 }
 
-pub async fn currency_codes_handler(bot: Bot, msg: Message, code: String, config: &Config) -> Result<(), MyError> {
+pub async fn currency_codes_handler(
+    bot: Bot,
+    msg: Message,
+    code: String,
+    config: &Config,
+) -> Result<(), MyError> {
     if msg.chat.is_private() {
         handle_currency_update::<DbUser>(bot, msg, code, config).await
     } else {
