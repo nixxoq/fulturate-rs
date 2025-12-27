@@ -1,3 +1,4 @@
+use crate::util::i18n::get_locale_by_owner;
 use crate::{
     bot::{
         callbacks::{
@@ -21,8 +22,8 @@ use crate::{
         },
     },
     errors::MyError,
-    util::i18n::{get_user_locale, set_locale},
     t,
+    util::i18n::{get_user_locale, set_locale},
 };
 use log::info;
 use std::sync::Arc;
@@ -32,7 +33,6 @@ use teloxide::{
     prelude::{CallbackQuery, Requester},
     types::MaybeInaccessibleMessage,
 };
-use crate::util::i18n::get_locale_by_owner;
 
 pub mod cobalt_pagination;
 pub mod delete;
@@ -397,8 +397,6 @@ pub async fn callback_query_handlers(bot: Bot, q: CallbackQuery) -> Result<(), M
                 return Ok(());
             }
 
-            locale = get_locale_by_owner(owner_id, owner_type, &config).await;
-
             if let Some(module) = MOD_MANAGER.get_module(module_key) {
                 let Some(MaybeInaccessibleMessage::Regular(msg)) = q.message else {
                     return Ok(());
@@ -463,7 +461,6 @@ pub async fn callback_query_handlers(bot: Bot, q: CallbackQuery) -> Result<(), M
                     .await?;
                 return Ok(());
             }
-
 
             if let Some(module) = MOD_MANAGER.get_module(module_key)
                 && let Some(MaybeInaccessibleMessage::Regular(msg)) = &q.message

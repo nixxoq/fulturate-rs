@@ -42,18 +42,16 @@ pub async fn start_handler(
                 r#type: "user".to_string(),
             };
 
-            println!(
-                "Creating default settings for new user {} (lang: {})",
-                user.id, &user_tg_lang
-            );
+            // println!(
+            //     "Creating default settings for new user {} (lang: {})",
+            //     user.id, &user_tg_lang
+            // );
 
             Settings::create_with_defaults(&owner, user_tg_lang).await?;
         }
     }
 
     let locale = get_chat_locale(&message.chat, config).await;
-
-    println!("user locale: {}", &locale);
 
     let version = config.get_version();
 
