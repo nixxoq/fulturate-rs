@@ -11,7 +11,7 @@ async fn main() {
     load_locales();
 
     tokio::spawn(async move {
-        let mut timer = interval(Duration::from_secs(60)); // TODO: change to 2 hours
+        let mut timer = interval(Duration::from_secs(2 * 60 * 60));
         timer.tick().await;
 
         loop {
