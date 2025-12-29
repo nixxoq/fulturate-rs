@@ -3,8 +3,10 @@ use teloxide::utils::command::BotCommands;
 #[derive(BotCommands, Clone)]
 #[command(rename_rule = "lowercase")]
 pub enum Command {
-    #[command(description = "start command? :D")]
+    #[command(description = "Start command")]
     Start(String),
+    #[command(description = "Help command")]
+    Help,
     #[command(description = "Speech recognition", alias = "sr")]
     SpeechRecognition,
     #[command(description = "Translate", alias = "tr")]

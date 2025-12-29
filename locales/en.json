@@ -2,6 +2,23 @@
   "meta": {
     "lang": "\uD83C\uDDFA\uD83C\uDDF8 English"
   },
+  "commands": {
+    "start": {
+      "desc": "Start the bot"
+    },
+    "help": {
+      "desc": "Show help guide"
+    },
+    "speechrecognition": {
+      "desc": "Transcribe and summarize voice messages"
+    },
+    "translate": {
+      "desc": "Text translator"
+    },
+    "settings": {
+      "desc": "Open settings"
+    }
+  },
   "common": {
     "yes": "Yes",
     "no": "No",
@@ -29,11 +46,18 @@
     "reply_to_voice": "You must reply to a voice message."
   },
   "start": {
-    "welcome_new": "<b>Welcome!</b> 👋\n\nI am Fulturate — your multifunctional assistant. Use the /settings command to explore features and configure me.\n\n",
-    "welcome_back": "<b>Fulturate is here!</b> ⚙️\n\n",
-    "status": "<b>System Status:</b>\n<pre>\n> Version:     %{version}\n> API Ping:    %{ping} ms\n> CPU Usage:   %{cpu}%\n> RAM:         %{ram_used}/%{ram_total} MB\n</pre>",
-    "btn_news": "News Channel",
-    "btn_terms": "Terms of Use"
+    "welcome": "👋 <b>Hi! I am Fulturate.</b>\n\nA powerful multifunctional bot designed to simplify your tasks.\n\n<b>What I can do:</b>\n~> <b>Download media:</b> easily download videos, audio, and photos from various sources (TikTok, Instagram, YouTube Shorts, Reddit) via cobalt.tools.\n~> <b>Currency Converter:</b> provide up-to-date exchange rates for dozens of currencies and crypto.\n~> <b>Whisper messages:</b> communicate privately in groups so no one else sees the text.\n~> <b>Deep configuration:</b> manage all modules via the menu.\n\n<i>More soon!</i>",
+    "btn_news": "📢 News Channel",
+    "btn_terms": "📄 Terms of Use",
+    "btn_settings_shortcut": "⚙️ Open Settings"
+  },
+  "help": {
+    "header_commands": "🤖 <b>Available commands:</b>\n\n",
+    "header_inline": "✨ <b>Inline features:</b>\n\nUse them in any chat by typing <code>@fulturatebot</code> followed by a query:\n\n",
+    "guide_whisper": "<b>🤫 Whisper:</b>\n<code>@fulturatebot Text @user</code>\nCreate a private message visible only to the recipient.\n",
+    "guide_currency": "<b>💱 Currency Converter:</b>\n<code>@fulturatebot 100 USD</code>\nConvert currencies and crypto.\n",
+    "guide_cobalt": "<b>📥 Cobalt Downloader:</b>\n<code>@fulturatebot https://youtube.com/watch...</code>\nQuickly download media via link.\n",
+    "guide_translate": "<b>🌐 Text Translate:</b>\n<code>@fulturatebot Hello world</code>\nTranslate text very fast"
   },
   "chat": {
     "bot_added_private": "<b>Welcome to Fulturate!</b> 👋\n\nI am ready to help with various tasks!\n\nHere is a short list of my features:\n- 📥 <b>Media Downloader</b>: from various sources.\n- 💱 <b>Currency Converter</b>: up-to-date rates at your fingertips.\n- 🤫 <b>Whisper System</b>: for more private communication.\n\nUse the /settings command to configure modules and learn more.",

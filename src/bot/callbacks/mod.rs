@@ -1,3 +1,4 @@
+use crate::bot::commands::help::handle_help_pagination_callback;
 use crate::util::i18n::get_locale_by_owner;
 use crate::{
     bot::{
@@ -95,6 +96,10 @@ enum CallbackAction<'a> {
     BackToFull,
     Whisper,
     Translate,
+    HelpPagination {
+        page: usize,
+        user_id: u64,
+    },
     NoOp,
 }
 
@@ -256,6 +261,17 @@ fn parse_callback_data(data: &'_ str) -> Option<CallbackAction<'_>> {
     }
     if data.starts_with("cobalt:") {
         return Some(CallbackAction::CobaltPagination);
+    }
+
+    if let Some(rest) = data.strip_prefix("help:page:") {
+        // help:page:PAGE:USER_ID
+        let parts: Vec<_> = rest.split(':').collect();
+        if parts.len() == 2
+            && let Ok(page) = parts[0].parse()
+            && let Ok(user_id) = parts[1].parse()
+        {
+            return Some(CallbackAction::HelpPagination { page, user_id });
+        }
     }
 
     None
@@ -512,6 +528,9 @@ pub async fn callback_query_handlers(bot: Bot, q: CallbackQuery) -> Result<(), M
         Some(CallbackAction::BackToFull) => back_handler(bot, q, &config).await?,
         Some(CallbackAction::Whisper) => handle_whisper_callback(bot, q, &config).await?,
         Some(CallbackAction::Translate) => handle_translate_callback(bot, q, &config).await?,
+        Some(CallbackAction::HelpPagination { page, user_id }) => {
+            handle_help_pagination_callback(bot, q, &config, page, user_id).await?;
+        }
         Some(CallbackAction::NoOp) => {
             bot.answer_callback_query(q.id).await?;
         }
