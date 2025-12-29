@@ -1,7 +1,7 @@
 FROM rust:1-bookworm AS base
 RUN apt-get update && apt-get install -y --no-install-recommends \
     openssl ca-certificates libfontconfig1 ffmpeg curl python3 build-essential \
-    clang lld mold \
+    clang lld mold nodejs \
     && curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp \
     && chmod a+rx /usr/local/bin/yt-dlp \
     && rm -rf /var/lib/apt/lists/*
@@ -32,7 +32,7 @@ RUN cargo build --release --workspace
 
 FROM debian:bookworm-slim AS fulturate-release
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    openssl ca-certificates libfontconfig1 ffmpeg curl python3 \
+    openssl ca-certificates libfontconfig1 ffmpeg curl python3 nodejs \
     && curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp \
     && chmod a+rx /usr/local/bin/yt-dlp \
     && rm -rf /var/lib/apt/lists/*

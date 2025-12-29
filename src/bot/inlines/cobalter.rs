@@ -71,6 +71,7 @@ mod video_metadata {
 
     pub async fn get_from_url(url: &str) -> Result<VideoMetadata, MyError> {
         let ytdlp_output = Command::new("yt-dlp")
+            .args(["--js-runtimes", "node"])
             .args(["--dump-json", url])
             .output()
             .await?;
