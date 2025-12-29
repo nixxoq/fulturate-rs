@@ -866,6 +866,7 @@ impl Transcription {
         let mut attempts = 0;
         let mut last_error = String::new();
 
+        let re = Regex::new(r"https?://[^\s)]+").unwrap();
         while attempts < 3 {
             match client
                 .send_message_with_file(
@@ -892,7 +893,6 @@ impl Transcription {
                         attempts, error_string
                     );
 
-                    let re = Regex::new(r"https?://[^\s)]+").unwrap();
                     let safe_error = re
                         .replace_all(&error_string, "<code>[Gemini URL]</code>")
                         .to_string();

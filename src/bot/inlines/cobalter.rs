@@ -409,14 +409,13 @@ pub async fn handle_inline_video(
                                 }
                             }
 
-                            if !is_audio {
-                                if let Some(ct) = resp.headers().get(reqwest::header::CONTENT_TYPE)
-                                {
-                                    let ct_str = ct.to_str().unwrap_or("");
-                                    if ct_str.contains("audio/") {
-                                        is_audio = true;
-                                        path = temp_dir.join(format!("{}.mp3", url_hash));
-                                    }
+                            if !is_audio
+                                && let Some(ct) = resp.headers().get(reqwest::header::CONTENT_TYPE)
+                            {
+                                let ct_str = ct.to_str().unwrap_or("");
+                                if ct_str.contains("audio/") {
+                                    is_audio = true;
+                                    path = temp_dir.join(format!("{}.mp3", url_hash));
                                 }
                             }
 

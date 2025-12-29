@@ -48,7 +48,7 @@ pub fn generate_help_text(locale: &str, page: usize) -> String {
             let command_name = if command.command.starts_with("/") {
                 command.command[1..].to_string()
             } else {
-                format!("{}", command.command)
+                command.command.to_string()
             };
 
             let key = format!("commands.{}.desc", command_name);
@@ -68,11 +68,11 @@ pub fn generate_help_text(locale: &str, page: usize) -> String {
         let mut text = t!("help.header_inline", locale = locale);
         text.push_str("<blockquote>");
         text.push_str(&t!("help.guide_cobalt", locale = locale));
-        text.push_str("\n");
+        text.push('\n');
         text.push_str(&t!("help.guide_currency", locale = locale));
-        text.push_str("\n");
+        text.push('\n');
         text.push_str(&t!("help.guide_whisper", locale = locale));
-        text.push_str("\n");
+        text.push('\n');
         text.push_str(&t!("help.guide_translate", locale = locale));
 
         text.push_str("</blockquote>");
@@ -94,13 +94,11 @@ pub fn generate_help_keyboard(
         settings_data,
     );
 
-    let keyboard = Paginator::new("help", total_pages)
+    Paginator::new("help", total_pages)
         .current_page(page)
         .set_callback_formatter(move |p| format!("help:page:{}:{}", p, user_id))
         .add_bottom_row(vec![settings_btn])
-        .build();
-
-    keyboard
+        .build()
 }
 
 pub async fn handle_help_pagination_callback(
@@ -110,7 +108,7 @@ pub async fn handle_help_pagination_callback(
     page: usize,
     target_user_id: u64,
 ) -> Result<(), MyError> {
-    let locale = get_chat_locale(&q.message.as_ref().expect("msg").chat(), config).await;
+    let locale = get_chat_locale(q.message.as_ref().expect("msg").chat(), config).await;
 
     if q.from.id.0 != target_user_id && target_user_id != 0 {
         bot.answer_callback_query(q.id)
