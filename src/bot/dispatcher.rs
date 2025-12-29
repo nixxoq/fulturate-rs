@@ -34,7 +34,7 @@ use teloxide::{
     },
     dptree,
     error_handlers::LoggingErrorHandler,
-    payloads::{AnswerInlineQuerySetters, SendDocumentSetters},
+    payloads::{AnswerInlineQuerySetters, SendDocumentSetters, DeleteWebhookSetters},
     prelude::{ChatId, Handler, Message, Requester},
     types::{
         InlineKeyboardButton, InlineKeyboardMarkup, InlineQuery, InlineQueryResult,
@@ -187,6 +187,7 @@ pub fn inline_query_handler() -> Handler<'static, Result<(), MyError>, DpHandler
 async fn run_bot(config: Arc<Config>) -> Result<(), MyError> {
     let command_menu = Command::bot_commands();
     let bot = config.get_bot();
+    bot.delete_webhook().drop_pending_updates(true).await?;
     bot.set_my_commands(command_menu.clone()).await?;
 
     let logic_handlers = dptree::entry()
