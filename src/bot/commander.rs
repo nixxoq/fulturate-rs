@@ -1,8 +1,8 @@
 use crate::{
     bot::commands::{
-        help::help_handler, settings::settings_command_handler,
-        speech_recognition::speech_recognition_handler, start::start_handler,
-        translate::translate_handler,
+        admin::admin_command_handler, admin::broadcast_command_handler, help::help_handler,
+        settings::settings_command_handler, speech_recognition::speech_recognition_handler,
+        start::start_handler, translate::translate_handler,
     },
     core::config::Config,
     errors::MyError,
@@ -20,6 +20,9 @@ pub async fn command_handlers(bot: Bot, message: Message, cmd: Command) -> Resul
             Command::Translate(arg) => translate_handler(bot, &message, &config, arg).await,
             Command::SpeechRecognition => speech_recognition_handler(bot, message, &config).await,
             Command::Settings => settings_command_handler(bot, message, &config).await,
+
+            Command::Admin => admin_command_handler(bot, message, &config).await,
+            Command::Broadcast => broadcast_command_handler(bot, message, &config).await,
         }
     });
     Ok(())

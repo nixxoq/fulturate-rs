@@ -13,6 +13,11 @@ pub enum Command {
     Translate(String),
     #[command(description = "Bot settings")]
     Settings,
+
+    #[command(description = "Admin Panel", hide)]
+    Admin,
+    #[command(description = "Broadcast message (reply only)", hide)]
+    Broadcast,
 }
 
 pub struct AudioStruct {

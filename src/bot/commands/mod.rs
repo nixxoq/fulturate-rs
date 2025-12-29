@@ -1,3 +1,4 @@
+pub mod admin;
 pub mod help;
 pub mod settings;
 pub mod speech_recognition;

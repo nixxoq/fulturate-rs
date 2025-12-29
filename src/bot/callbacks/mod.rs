@@ -35,6 +35,7 @@ use teloxide::{
     types::MaybeInaccessibleMessage,
 };
 
+pub mod admin;
 pub mod cobalt_pagination;
 pub mod delete;
 pub mod translate;
@@ -100,6 +101,7 @@ enum CallbackAction<'a> {
         page: usize,
         user_id: u64,
     },
+    Admin,
     NoOp,
 }
 
@@ -272,6 +274,10 @@ fn parse_callback_data(data: &'_ str) -> Option<CallbackAction<'_>> {
         {
             return Some(CallbackAction::HelpPagination { page, user_id });
         }
+    }
+
+    if data.starts_with("admin:") {
+        return Some(CallbackAction::Admin);
     }
 
     None
@@ -530,6 +536,9 @@ pub async fn callback_query_handlers(bot: Bot, q: CallbackQuery) -> Result<(), M
         Some(CallbackAction::Translate) => handle_translate_callback(bot, q, &config).await?,
         Some(CallbackAction::HelpPagination { page, user_id }) => {
             handle_help_pagination_callback(bot, q, &config, page, user_id).await?;
+        }
+        Some(CallbackAction::Admin) => {
+            admin::handle_admin_callback(bot, q, &config).await?;
         }
         Some(CallbackAction::NoOp) => {
             bot.answer_callback_query(q.id).await?;
