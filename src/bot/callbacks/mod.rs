@@ -26,7 +26,7 @@ use crate::{
     t,
     util::i18n::{get_user_locale, set_locale},
 };
-use log::info;
+use log::{error, info};
 use std::sync::Arc;
 use teloxide::{
     Bot,
@@ -519,14 +519,47 @@ pub async fn callback_query_handlers(bot: Bot, q: CallbackQuery) -> Result<(), M
         Some(CallbackAction::DeleteMessageConfirmation) => {
             handle_delete_confirmation(bot, q, &config).await?
         }
-        Some(CallbackAction::Summarize) => summarization_handler(bot, q, &config).await?,
-        Some(CallbackAction::Retell) => summarization_handler(bot, q, &config).await?,
+        Some(CallbackAction::Summarize) => {
+            bot.answer_callback_query(q.id.clone()).await?;
+            let (bot_c, q_c, config_c) = (bot.clone(), q.clone(), config.clone());
+
+            tokio::spawn(async move {
+                if let Err(e) = summarization_handler(bot_c, q_c, &config_c).await {
+                    error!("Error in summarization_handler: {:?}", e);
+                }
+            });
+        }
+        Some(CallbackAction::Retell) => {
+            bot.answer_callback_query(q.id.clone()).await?;
+            let (bot_c, q_c, config_c) = (bot.clone(), q.clone(), config.clone());
+
+            tokio::spawn(async move {
+                if let Err(e) = summarization_handler(bot_c, q_c, &config_c).await {
+                    error!("Error in summarization_handler: {:?}", e);
+                }
+            });
+        }
         Some(CallbackAction::RetrySpeech {
             message_id,
             action_type,
             attempt,
         }) => {
-            retry_speech_handler(bot, q.clone(), &config, message_id, action_type, attempt).await?
+            bot.answer_callback_query(q.id.clone()).await?;
+            let (bot_c, q_c, config_c, action_type) = (
+                bot.clone(),
+                q.clone(),
+                config.clone(),
+                action_type.to_string(),
+            );
+
+            tokio::spawn(async move {
+                if let Err(e) =
+                    retry_speech_handler(bot_c, q_c, &config_c, message_id, &action_type, attempt)
+                        .await
+                {
+                    error!("Error in retry_speech_handler: {:?}", e);
+                }
+            });
         }
         Some(CallbackAction::TranscriptionPagination) => {
             pagination_handler(bot, q, &config).await?
