@@ -23,13 +23,7 @@ const CACHE_DURATION_SECS: u64 = 60 * 10;
 pub const CURRENCY_CONFIG_PATH: &str = "currencies.json";
 const COINBASE_API_URL: &str = "https://api.coinbase.com/v2/exchange-rates?currency=UAH";
 const TONAPI_URL: &str = "https://tonapi.io/v2/rates";
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum OutputLanguage {
-    Russian,
-    #[allow(dead_code)]
-    English,
-}
+const BANNED_CHARACTERS: [char; 6] = ['@', '#', '/', '_', ':', '-'];
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct DetectedCurrency {
@@ -71,6 +65,7 @@ impl RateProvider for CoinbaseProvider {
             .await?
             .json::<CbResponse>()
             .await?;
+
         let mut rates = HashMap::new();
         rates.insert(resp.data.currency, 1.0);
 
@@ -187,25 +182,85 @@ impl CurrencyDetector {
             .find_iter(&text_lower)
             .filter_map(|mat| {
                 let code = &self.pattern_map[mat.pattern()];
-                let left_part = &text[..mat.start()];
-                let right_part = &text[mat.end()..];
+                let (start, end) = (mat.start(), mat.end());
+                let match_str = &text_lower[start..end];
 
-                self.extract_number_end(left_part)
-                    .or_else(|| self.extract_number_start(right_part))
-                    .map(|amount| DetectedCurrency {
-                        amount,
-                        currency_code: code.clone(),
-                    })
+                let is_alpha = match_str.chars().any(char::is_alphabetic);
+                let is_single = match_str.chars().count() == 1;
+
+                if is_alpha {
+                    let prev = text_lower[..start].chars().last();
+                    let next = text_lower[end..].chars().next();
+
+                    if prev.is_some_and(char::is_alphabetic)
+                        || next.is_some_and(char::is_alphabetic)
+                    {
+                        return None;
+                    }
+
+                    if let (Some(p), Some(n)) = (prev, next)
+                        && p.is_alphanumeric()
+                        && n.is_alphanumeric()
+                    {
+                        return None;
+                    }
+                }
+
+                let (left_part, right_part) = (&text[..start], &text[end..]);
+
+                let amount = if is_alpha && is_single {
+                    Self::find_strict(left_part, right_part)
+                } else {
+                    Self::find_loose(left_part, right_part)
+                };
+
+                amount.map(|amount| DetectedCurrency {
+                    amount,
+                    currency_code: code.clone(),
+                })
             })
             .collect()
     }
 
-    fn extract_number_end(&self, text: &str) -> Option<f64> {
-        text.split_whitespace().last().and_then(Self::parse_amount)
+    fn find_strict(left: &str, right: &str) -> Option<f64> {
+        if let Some(token) = left.split_whitespace().last()
+            && !left.chars().last().is_some_and(|c| c.is_ascii_digit())
+            && !token.starts_with(BANNED_CHARACTERS)
+            && let Some(value) = Self::parse_amount(token)
+        {
+            return Some(value);
+        }
+
+        if let Some(token) = right.split_whitespace().next()
+            && !right.chars().next().is_some_and(|c| c.is_ascii_digit())
+            && !token.starts_with(BANNED_CHARACTERS)
+            && let Some(value) = Self::parse_amount(token)
+        {
+            return Some(value);
+        }
+
+        None
     }
 
-    fn extract_number_start(&self, text: &str) -> Option<f64> {
-        text.split_whitespace().next().and_then(Self::parse_amount)
+    fn find_loose(left: &str, right: &str) -> Option<f64> {
+        let limit = 5; // TODO: should we make this crutch configurable in settings? If yes, this option will be named like "Value depth"
+
+        let left_search = left
+            .split_whitespace()
+            .rev()
+            .take(limit)
+            .filter(|token| !token.starts_with(BANNED_CHARACTERS))
+            .find_map(Self::parse_amount);
+
+        if left_search.is_some() {
+            return left_search;
+        }
+
+        right
+            .split_whitespace()
+            .take(limit)
+            .filter(|token| !token.starts_with(BANNED_CHARACTERS))
+            .find_map(Self::parse_amount)
     }
 
     fn parse_amount(s: &str) -> Option<f64> {
@@ -216,6 +271,13 @@ impl CurrencyDetector {
 
         let mut total = 0.0;
         let mut rest = s_clean.as_str();
+
+        if let Some(c) = rest.chars().next()
+            && !c.is_ascii_digit()
+            && matches!(c, '.' | ',')
+        {
+            return None;
+        }
 
         while !rest.is_empty() {
             let digit_end = rest
@@ -279,7 +341,7 @@ pub enum ConvertError {
 }
 
 impl CurrencyConverter {
-    pub fn new(_language: OutputLanguage) -> Result<Self, ConvertError> {
+    pub fn new() -> Result<Self, ConvertError> {
         let content = fs::read_to_string(CURRENCY_CONFIG_PATH)
             .map_err(|e| ConvertError::ConfigError(e.to_string()))?;
         let currency_list: Vec<CurrencyStruct> = serde_json::from_str(&content)?;

@@ -3,7 +3,7 @@ mod json;
 use crate::core::{
     config::json::{JsonConfig, read_json_config},
     db::redis::RedisCache,
-    services::currency::converter::{CurrencyConverter, OutputLanguage},
+    services::currency::converter::CurrencyConverter,
 };
 use dotenv::dotenv;
 use gem_rs::api::DEFAULT_BASE_URL;
@@ -106,7 +106,7 @@ impl Config {
             error!("Unable to read config.json");
             std::process::exit(1);
         };
-        let currency_converter = Arc::new(CurrencyConverter::new(OutputLanguage::Russian).unwrap()); // TODO: get language from config
+        let currency_converter = Arc::new(CurrencyConverter::new().unwrap());
         let Ok(mongodb_url) = std::env::var("MONGODB_URL") else {
             error!("MONGODB_URL expected");
             std::process::exit(1);
