@@ -29,6 +29,7 @@ pub struct Config {
     telegram_api: String,
     gemini_base_url: String,
     trash_channel_id: String,
+    channel_username: String,
 }
 
 impl Config {
@@ -131,6 +132,11 @@ impl Config {
             std::process::exit(1);
         };
 
+        let Ok(channel_username) = std::env::var("CHANNEL_USERNAME") else {
+            error!("CHANNEL_USERNAME expected");
+            std::process::exit(1);
+        };
+
         Config {
             bot,
             cobalt_client,
@@ -146,6 +152,7 @@ impl Config {
             telegram_api: telegram_api_url,
             gemini_base_url,
             trash_channel_id,
+            channel_username,
         }
     }
 
@@ -204,5 +211,9 @@ impl Config {
 
     pub fn get_gemini_base_url(&self) -> &str {
         &self.gemini_base_url
+    }
+
+    pub fn get_channel_username(&self) -> &str {
+        &self.channel_username
     }
 }

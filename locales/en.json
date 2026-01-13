@@ -62,7 +62,9 @@
   "chat": {
     "bot_added_private": "<b>Welcome to Fulturate!</b> 👋\n\nI am ready to help with various tasks!\n\nHere is a short list of my features:\n- 📥 <b>Media Downloader</b>: from various sources.\n- 💱 <b>Currency Converter</b>: up-to-date rates at your fingertips.\n- 🤫 <b>Whisper System</b>: for more private communication.\n\nUse the /settings command to configure modules and learn more.",
     "bot_added_group": "<b>Thanks for adding Fulturate to your chat!</b> 🎉\n\nI am a multifunctional bot ready to assist!\n\nFor full functionality, I need <b>admin rights</b>. This allows me to process commands and interact efficiently.\n\nOne of the admins can use the /settings command to configure my modules.",
-    "kicked": "Bot was kicked/banned. Data deleted for ID: %{id}"
+    "kicked": "Bot was kicked/banned. Data deleted for ID: %{id}",
+    "must_subscribe": "To continue, you need to subscribe to our channel",
+    "subscribe_needed_btn": "📢 Subscribe to Channel"
   },
   "settings": {
     "main_header": "⚙️ <b>Settings</b>\n\nPlease select a category to configure:",

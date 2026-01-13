@@ -19,9 +19,26 @@ pub async fn start_handler(
     bot: Bot,
     message: Message,
     config: &Config,
-    _arg: String,
+    arg: String,
 ) -> Result<(), MyError> {
     let user_opt = message.from.as_ref();
+    let locale = get_chat_locale(&message.chat, config).await;
+
+    if arg == "register" {
+        let channel_url = format!(
+            "https://t.me/{}",
+            config.get_channel_username().replace("@", "")
+        );
+
+        let subscribe_keyboard = InlineKeyboardMarkup::new(vec![vec![InlineKeyboardButton::url(
+            t!("chat.subscribe_needed_btn", locale = &locale),
+            channel_url.parse()?,
+        )]]);
+
+        bot.send_message(message.chat.id, t!("chat.must_subscribe", locale = &locale))
+            .reply_markup(subscribe_keyboard)
+            .await?;
+    }
 
     if let Some(user) = user_opt {
         let user_tg_lang = normalize_lang_code(user.language_code.as_deref());
@@ -42,7 +59,9 @@ pub async fn start_handler(
         }
     }
 
-    let locale = get_chat_locale(&message.chat, config).await;
+    if arg == "register" {
+        return Ok(());
+    }
 
     let settings_data = format!(
         "settings_main:user:{}:{}",

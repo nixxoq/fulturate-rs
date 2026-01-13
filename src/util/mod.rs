@@ -1,6 +1,6 @@
 use teloxide::Bot;
-use teloxide::prelude::{ChatId, Requester};
-use teloxide::types::User;
+use teloxide::prelude::{ChatId, Requester, UserId};
+use teloxide::types::{ChatMemberKind, Recipient, User};
 
 pub mod currency_values;
 pub mod enums;
@@ -44,4 +44,15 @@ pub fn is_author(clicker: &User, target_user_id: u64) -> bool {
     }
 
     false
+}
+
+pub async fn is_user_subscribed(bot: &Bot, user_id: UserId, chat: impl Into<Recipient>) -> bool {
+    bot.get_chat_member(chat, user_id)
+        .await
+        .is_ok_and(|member| {
+            !matches!(
+                member.kind,
+                ChatMemberKind::Left | ChatMemberKind::Banned(..)
+            )
+        })
 }
