@@ -5,7 +5,7 @@ use crate::{
     t,
     util::currency_values::WORD_VALUES,
 };
-use aho_corasick::AhoCorasick;
+use aho_corasick::{AhoCorasick, MatchKind};
 use async_trait::async_trait;
 use log::error;
 use reqwest::Client;
@@ -171,7 +171,10 @@ impl CurrencyDetector {
             })
             .unzip();
 
-        let ac = AhoCorasick::new(&patterns).expect("Failed to build AhoCorasick");
+        let ac = AhoCorasick::builder()
+            .match_kind(MatchKind::LeftmostLongest)
+            .build(&patterns)
+            .expect("Failed to build AhoCorasick");
         Self { ac, pattern_map }
     }
 
@@ -186,7 +189,7 @@ impl CurrencyDetector {
                 let match_str = &text_lower[start..end];
 
                 let is_alpha = match_str.chars().any(char::is_alphabetic);
-                let is_single = match_str.chars().count() == 1;
+                let char_count = match_str.chars().count();
 
                 if is_alpha {
                     let prev = text_lower[..start].chars().last();
@@ -208,10 +211,12 @@ impl CurrencyDetector {
 
                 let (left_part, right_part) = (&text[..start], &text[end..]);
 
-                let amount = if is_alpha && is_single {
+                // TODO: should we make this crutch configurable in settings? If yes, this option will be named like "Value depth"
+                let amount = if is_alpha && char_count == 1 {
                     Self::find_strict(left_part, right_part)
                 } else {
-                    Self::find_loose(left_part, right_part)
+                    let limit = if is_alpha && char_count == 2 { 1 } else { 5 };
+                    Self::find_loose(left_part, right_part, limit)
                 };
 
                 amount.map(|amount| DetectedCurrency {
@@ -225,7 +230,7 @@ impl CurrencyDetector {
     fn find_strict(left: &str, right: &str) -> Option<f64> {
         if let Some(token) = left.split_whitespace().last()
             && !left.chars().last().is_some_and(|c| c.is_ascii_digit())
-            && !token.starts_with(BANNED_CHARACTERS)
+            && !token.starts_with(&BANNED_CHARACTERS[..])
             && let Some(value) = Self::parse_amount(token)
         {
             return Some(value);
@@ -233,7 +238,7 @@ impl CurrencyDetector {
 
         if let Some(token) = right.split_whitespace().next()
             && !right.chars().next().is_some_and(|c| c.is_ascii_digit())
-            && !token.starts_with(BANNED_CHARACTERS)
+            && !token.starts_with(&BANNED_CHARACTERS[..])
             && let Some(value) = Self::parse_amount(token)
         {
             return Some(value);
@@ -242,14 +247,12 @@ impl CurrencyDetector {
         None
     }
 
-    fn find_loose(left: &str, right: &str) -> Option<f64> {
-        let limit = 5; // TODO: should we make this crutch configurable in settings? If yes, this option will be named like "Value depth"
-
+    fn find_loose(left: &str, right: &str, limit: usize) -> Option<f64> {
         let left_search = left
             .split_whitespace()
             .rev()
             .take(limit)
-            .filter(|token| !token.starts_with(BANNED_CHARACTERS))
+            .filter(|token| !token.starts_with(&BANNED_CHARACTERS[..]))
             .find_map(Self::parse_amount);
 
         if left_search.is_some() {
@@ -259,7 +262,7 @@ impl CurrencyDetector {
         right
             .split_whitespace()
             .take(limit)
-            .filter(|token| !token.starts_with(BANNED_CHARACTERS))
+            .filter(|token| !token.starts_with(&BANNED_CHARACTERS[..]))
             .find_map(Self::parse_amount)
     }
 
