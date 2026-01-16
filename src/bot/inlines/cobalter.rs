@@ -122,7 +122,7 @@ mod video_metadata {
 }
 
 pub async fn is_query_url(inline_query: InlineQuery) -> bool {
-    if !URL_REGEX.is_match(&inline_query.query) {
+    if !URL_REGEX.is_match(&inline_query.query.trim()) {
         return false;
     };
     let owner = Owner {
