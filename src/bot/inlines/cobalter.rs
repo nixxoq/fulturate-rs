@@ -15,7 +15,10 @@ use crate::{
     util::{MAX_DURATION_SECONDS, i18n::get_user_locale},
 };
 use anyhow::anyhow;
-use ccobalt::model::request::{DownloadRequest, FilenameStyle};
+use ccobalt::model::{
+    error::CobaltError,
+    request::{DownloadRequest, FilenameStyle},
+};
 use once_cell::sync::Lazy;
 use regex::Regex;
 use std::{path::PathBuf, sync::Arc};
@@ -267,7 +270,46 @@ pub async fn handle_cobalt_inline(
                 redis.set(&cache_key, &cache_entry, 24 * 60 * 60).await?;
                 build_results_from_media(url, download_result, &url_hash, user_id, &locale)
             }
-            _ => {
+            Err(e) => {
+                let is_restricted = if let Some(cobalt_error) = e.downcast_ref::<CobaltError>() {
+                    matches!(
+                        cobalt_error.code.as_str(),
+                        "error.api.content.video.unavailable"
+                            | "error.api.content.video.age"
+                            | "error.api.content.video.private"
+                            | "error.api.content.video.region"
+                    )
+                } else {
+                    let err_str = e.to_string();
+                    err_str.contains("error.api.content.video.unavailable")
+                        || err_str.contains("Sign in to confirm your age")
+                };
+
+                if is_restricted {
+                    let error_article = InlineQueryResultArticle::new(
+                        "error_restricted",
+                        t!("modules.cobalt.error_restricted_title", locale = &locale),
+                        InputMessageContent::Text(InputMessageContentText::new(t!(
+                            "modules.cobalt.error_restricted",
+                            locale = &locale
+                        ))),
+                    )
+                    .description(t!("modules.cobalt.error_restricted", locale = &locale));
+                    vec![error_article.into()]
+                } else {
+                    log::error!("Cobalt processing error: {:?}", e);
+                    let error_article = InlineQueryResultArticle::new(
+                        "error_processing",
+                        t!("modules.cobalt.error_processing_title", locale = &locale),
+                        InputMessageContent::Text(InputMessageContentText::new(t!(
+                            "modules.cobalt.error_processing",
+                            locale = &locale
+                        ))),
+                    );
+                    vec![error_article.into()]
+                }
+            }
+            Ok(None) => {
                 let error_article = InlineQueryResultArticle::new(
                     "error_processing",
                     t!("modules.cobalt.error_processing_title", locale = &locale),

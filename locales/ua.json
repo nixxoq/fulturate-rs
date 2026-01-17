@@ -100,6 +100,8 @@
       "attr_off": "Атрибуція: Вимк ❌",
       "error_duration_title": "Відео занадто довге",
       "error_too_long": "❌ Відео довше за %{minutes} хвилин і не може бути оброблене.",
+      "error_restricted_title": "Контент недоступний",
+      "error_restricted": "❌ Це відео недоступне, приватне або має вікові обмеження.",
       "error_processing_title": "Помилка обробки",
       "error_processing": "❌ Помилка під час обробки відео.",
       "processing": "⏳ Обробка відео...",
