@@ -391,11 +391,6 @@ async fn get_cached(
     };
 
     cache.set(&file_cache_key, &new_cache_entry, 86400).await?;
-    debug!(
-        "Saved new transcription to file cache for unique_id: {}",
-        file.file_unique_id
-    );
-
     Ok(new_cache_entry)
 }
 

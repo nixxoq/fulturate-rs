@@ -98,9 +98,6 @@ async fn prompt_registration(
     me: Me,
     config: Arc<Config>,
 ) -> Result<(), MyError> {
-    let user_id_str = q.from.id.to_string();
-    debug!("User {} not found. Offering to register.", user_id_str);
-
     let locale = get_locale_by_id(q.from.id.0, &config).await;
 
     let start_url = format!("https://t.me/{}?start=inl", me.username());
