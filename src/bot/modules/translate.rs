@@ -24,7 +24,7 @@ pub struct TranslateSettings {
 impl Default for TranslateSettings {
     fn default() -> Self {
         Self {
-            enabled: true,
+            enabled: false,
             default_engine: Engine::Google,
         }
     }
