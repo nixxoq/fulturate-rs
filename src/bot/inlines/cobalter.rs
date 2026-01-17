@@ -12,13 +12,10 @@ use crate::{
     },
     errors::MyError,
     t,
-    util::{MAX_DURATION_SECONDS, i18n::get_user_locale},
+    util::{MAX_DURATION_SECONDS, enums::CobaltErrorType, i18n::get_user_locale},
 };
 use anyhow::anyhow;
-use ccobalt::model::{
-    error::CobaltError,
-    request::{DownloadRequest, FilenameStyle},
-};
+use ccobalt::model::request::{DownloadRequest, FilenameStyle};
 use once_cell::sync::Lazy;
 use regex::Regex;
 use std::{path::PathBuf, sync::Arc};
@@ -213,7 +210,7 @@ pub async fn handle_cobalt_inline(
     let cache_key = format!("cobalt_cache:{}", url_hash);
     let redis = config.get_redis_client();
 
-    let results = if let Ok(Some(cached_entry)) = redis.get::<CobaltCache>(&cache_key).await {
+    if let Ok(Some(cached_entry)) = redis.get::<CobaltCache>(&cache_key).await {
         let download_result = match cached_entry {
             CobaltCache::Pending(dr) => dr,
             CobaltCache::Ready { original_url, .. } => DownloadResult::Video {
@@ -222,107 +219,70 @@ pub async fn handle_cobalt_inline(
                 filename: None,
             },
         };
-        let original_url_str = match &download_result {
+        let original_url = match &download_result {
             DownloadResult::Video { original_url, .. } => original_url.clone(),
             DownloadResult::Photos { original_url, .. } => original_url.clone(),
         };
-        build_results_from_media(
-            &original_url_str,
-            download_result,
-            &url_hash,
-            user_id,
-            &locale,
-        )
-    } else {
-        match video_metadata::get_from_url(url).await {
-            Ok(meta) if meta.duration > MAX_DURATION_SECONDS => {
-                let minutes = MAX_DURATION_SECONDS / 60;
+        let results =
+            build_results_from_media(&original_url, download_result, &url_hash, user_id, &locale);
+        bot.answer_inline_query(q.id, results).cache_time(0).await?;
+        return Ok(());
+    }
 
-                let error_article = InlineQueryResultArticle::new(
-                    "error_duration",
-                    t!("modules.cobalt.error_duration_title", locale = &locale),
-                    InputMessageContent::Text(InputMessageContentText::new(t!(
-                        "modules.cobalt.error_too_long",
-                        locale = &locale,
-                        minutes = minutes
-                    ))),
-                )
-                .description(t!(
+    match video_metadata::get_from_url(url).await {
+        Ok(meta) if meta.duration > MAX_DURATION_SECONDS => {
+            let minutes = MAX_DURATION_SECONDS / 60;
+            let error_article = InlineQueryResultArticle::new(
+                "error_duration",
+                t!("modules.cobalt.error_duration_title", locale = &locale),
+                InputMessageContent::Text(InputMessageContentText::new(t!(
                     "modules.cobalt.error_too_long",
                     locale = &locale,
                     minutes = minutes
-                ));
-                bot.answer_inline_query(q.id, vec![error_article.into()])
-                    .await?;
-                return Ok(());
-            }
-            Err(e) => {
-                log::warn!("Could not get video metadata with yt-dlp: {}", e);
-            }
-            _ => {}
+                ))),
+            )
+            .description(t!(
+                "modules.cobalt.error_too_long",
+                locale = &locale,
+                minutes = minutes
+            ));
+
+            bot.answer_inline_query(q.id, vec![error_article.into()])
+                .await?;
+            return Ok(());
         }
+        Err(e) => log::warn!("Metadata fetch failed: {}", e),
+        _ => {}
+    }
 
-        let settings = Settings::get_module_settings::<CobaltSettings>(&owner, "cobalt").await?;
-        let cobalt_client = config.get_cobalt_client();
-        match resolve_download_url(url, &settings, cobalt_client).await {
-            Ok(Some(download_result)) => {
-                let cache_entry = CobaltCache::Pending(download_result.clone());
-                redis.set(&cache_key, &cache_entry, 24 * 60 * 60).await?;
-                build_results_from_media(url, download_result, &url_hash, user_id, &locale)
-            }
-            Err(e) => {
-                let is_restricted = if let Some(cobalt_error) = e.downcast_ref::<CobaltError>() {
-                    matches!(
-                        cobalt_error.code.as_str(),
-                        "error.api.content.video.unavailable"
-                            | "error.api.content.video.age"
-                            | "error.api.content.video.private"
-                            | "error.api.content.video.region"
-                    )
-                } else {
-                    let err_str = e.to_string();
-                    err_str.contains("error.api.content.video.unavailable")
-                        || err_str.contains("Sign in to confirm your age")
-                };
+    let settings = Settings::get_module_settings::<CobaltSettings>(&owner, "cobalt").await?;
+    let cobalt_client = config.get_cobalt_client();
 
-                if is_restricted {
-                    let error_article = InlineQueryResultArticle::new(
-                        "error_restricted",
-                        t!("modules.cobalt.error_restricted_title", locale = &locale),
-                        InputMessageContent::Text(InputMessageContentText::new(t!(
-                            "modules.cobalt.error_restricted",
-                            locale = &locale
-                        ))),
-                    )
-                    .description(t!("modules.cobalt.error_restricted", locale = &locale));
-                    vec![error_article.into()]
-                } else {
-                    log::error!("Cobalt processing error: {:?}", e);
-                    let error_article = InlineQueryResultArticle::new(
-                        "error_processing",
-                        t!("modules.cobalt.error_processing_title", locale = &locale),
-                        InputMessageContent::Text(InputMessageContentText::new(t!(
-                            "modules.cobalt.error_processing",
-                            locale = &locale
-                        ))),
-                    );
-                    vec![error_article.into()]
-                }
+    let result_articles = match resolve_download_url(url, &settings, cobalt_client).await {
+        Ok(Some(download_result)) => {
+            let cache_entry = CobaltCache::Pending(download_result.clone());
+            redis.set(&cache_key, &cache_entry, 24 * 60 * 60).await?;
+            build_results_from_media(url, download_result, &url_hash, user_id, &locale)
+                .into_iter()
+                .map(|r| r.into())
+                .collect()
+        }
+        Ok(None) => {
+            vec![CobaltErrorType::Unknown.into_article(&locale).into()]
+        }
+        Err(e) => {
+            let error_type = CobaltErrorType::from_error(&e);
+            if matches!(error_type, CobaltErrorType::Unknown) {
+                log::error!("Cobalt API Error: {:?}", e);
             }
-            Ok(None) => {
-                let error_article = InlineQueryResultArticle::new(
-                    "error_processing",
-                    t!("modules.cobalt.error_processing_title", locale = &locale),
-                    InputMessageContent::Text(InputMessageContentText::new(t!(
-                        "modules.cobalt.error_processing",
-                        locale = &locale
-                    ))),
-                );
-                vec![error_article.into()]
-            }
+
+            vec![error_type.into_article(&locale).into()]
         }
     };
-    bot.answer_inline_query(q.id, results).cache_time(0).await?;
+
+    bot.answer_inline_query(q.id, result_articles)
+        .cache_time(0)
+        .await?;
     Ok(())
 }
 
