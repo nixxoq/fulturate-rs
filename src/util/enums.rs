@@ -49,16 +49,10 @@ impl CobaltErrorType {
                         .unwrap_or(60);
                     Self::RateLimit { seconds }
                 }
-                code if matches!(
-                    code,
-                    "error.api.content.video.unavailable"
-                        | "error.api.content.video.age"
-                        | "error.api.content.video.private"
-                        | "error.api.content.video.region"
-                ) =>
-                {
-                    Self::Restricted
-                }
+                "error.api.content.video.unavailable"
+                | "error.api.content.video.age"
+                | "error.api.content.video.private"
+                | "error.api.content.video.region" => Self::Restricted,
                 _ => Self::Unknown,
             };
         }

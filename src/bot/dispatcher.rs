@@ -22,7 +22,7 @@ use crate::{
     t,
     util::{enums::Command, i18n::get_locale_by_id, is_user_subscribed},
 };
-use log::{debug, error, info};
+use log::{error, info};
 use mongodb::bson::doc;
 use oximod::{Model, OxiClient};
 use serde::Deserialize;

@@ -122,7 +122,7 @@ mod video_metadata {
 }
 
 pub async fn is_query_url(inline_query: InlineQuery) -> bool {
-    if !URL_REGEX.is_match(&inline_query.query.trim()) {
+    if !URL_REGEX.is_match(inline_query.query.trim()) {
         return false;
     };
     let owner = Owner {
@@ -264,7 +264,6 @@ pub async fn handle_cobalt_inline(
             redis.set(&cache_key, &cache_entry, 24 * 60 * 60).await?;
             build_results_from_media(url, download_result, &url_hash, user_id, &locale)
                 .into_iter()
-                .map(|r| r.into())
                 .collect()
         }
         Ok(None) => {

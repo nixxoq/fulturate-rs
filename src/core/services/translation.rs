@@ -2,20 +2,15 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Engine {
+    #[default]
     Google,
     DeepL,
     Bing,
     Yandex,
     LibreTranslate,
     MyMemory,
-}
-
-impl Default for Engine {
-    fn default() -> Self {
-        Engine::Google
-    }
 }
 
 impl Engine {
@@ -53,10 +48,7 @@ impl Engine {
     }
 
     pub fn supports_auto(&self) -> bool {
-        match self {
-            Engine::Google | Engine::Bing | Engine::Yandex => true,
-            _ => false,
-        }
+        matches!(self, Engine::Google | Engine::Bing | Engine::Yandex)
     }
 }
 
