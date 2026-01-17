@@ -2,18 +2,20 @@ use crate::{
     bot::{
         commands::translate::{TranslateJob, TranslationCache, split_text_tr},
         keyboards::{delete::delete_message_button, translate::create_language_keyboard},
+        modules::{Owner, translate::TranslateSettings},
     },
     core::{
         config::Config,
+        db::schemas::settings::Settings,
         services::translation::{SUPPORTED_LANGUAGES, normalize_language_code},
     },
     errors::MyError,
+    t,
     util::{
         i18n::get_locale_by_id,
         is_author,
         paginator::{FrameBuild, Paginator},
     },
-    t,
 };
 use futures::future::join_all;
 use log::info;
@@ -26,7 +28,6 @@ use teloxide::{
     },
     utils::html::escape,
 };
-use translators::{GoogleTranslator, Translator};
 use uuid::Uuid;
 
 pub async fn handle_translate_callback(
@@ -200,11 +201,29 @@ async fn handle_language_selection(
 
     let normalized_lang = normalize_language_code(target_lang);
 
-    let text_chunks = split_text_tr(text_to_translate, 2800);
-    let google_trans = GoogleTranslator::default();
-    let translation_futures = text_chunks
-        .iter()
-        .map(|chunk| google_trans.translate_async(chunk, "", &normalized_lang));
+    let owner = Owner {
+        id: message.chat.id.to_string(),
+        r#type: if message.chat.is_private() {
+            "user".to_string()
+        } else {
+            "group".to_string()
+        },
+    };
+    let settings: TranslateSettings = Settings::get_module_settings(&owner, "translate").await?;
+    let text_chunks = split_text_tr(text_to_translate, 250);
+
+    let translation_futures = text_chunks.iter().map(|chunk| {
+        let target = normalized_lang.clone();
+        async move {
+            config
+                .get_mozhi_client()
+                .request(chunk, target)
+                .engine(settings.default_engine)
+                .source("auto")
+                .send()
+                .await
+        }
+    });
 
     let results = join_all(translation_futures).await;
     let translated_chunks: Vec<String> = results.into_iter().filter_map(Result::ok).collect();
