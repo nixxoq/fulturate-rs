@@ -2,9 +2,11 @@ use crate::bot::modules::Owner;
 use crate::core::config::Config;
 use crate::core::db::schemas::settings::Settings;
 use lazy_static::lazy_static;
+use log::{debug, error, info, warn};
 use mongodb::bson::doc;
 use oximod::ModelTrait;
 use regex::Regex;
+use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::fs;
@@ -19,10 +21,120 @@ lazy_static! {
 
 pub const DEFAULT_LOCALE: &str = "en";
 
+const REPO_OWNER: &str = "Fulturate";
+const REPO_NAME: &str = "locales";
+const REPO_PATH: &str = "locales";
+const LOCALES_DIR: &str = "locales";
+
+#[derive(Deserialize, Debug)]
+struct GitHubFile {
+    name: String,
+    download_url: Option<String>,
+}
+
+pub async fn check_and_update_locales() -> bool {
+    let path = Path::new(LOCALES_DIR);
+    if !path.exists() {
+        let _ = fs::create_dir(path);
+    }
+
+    let client = reqwest::Client::builder()
+        .user_agent("FulturateBot")
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .unwrap_or_default();
+
+    let api_url = if REPO_PATH.is_empty() {
+        format!(
+            "https://api.github.com/repos/{}/{}/contents",
+            REPO_OWNER, REPO_NAME
+        )
+    } else {
+        format!(
+            "https://api.github.com/repos/{}/{}/contents/{}",
+            REPO_OWNER, REPO_NAME, REPO_PATH
+        )
+    };
+
+    let files_list: Vec<GitHubFile> = match client.get(&api_url).send().await {
+        Ok(resp) => {
+            if !resp.status().is_success() {
+                warn!("[LOCALE] Failed to get file list: HTTP {}", resp.status());
+                return false;
+            }
+            match resp.json::<Vec<GitHubFile>>().await {
+                Ok(files) => files,
+                Err(e) => {
+                    error!("[LOCALE] Failed to parse GitHub response: {}", e);
+                    return false;
+                }
+            }
+        }
+        Err(e) => {
+            error!("[LOCALE] Network error getting file list: {}", e);
+            return false;
+        }
+    };
+
+    let mut any_updated = false;
+
+    for file in files_list {
+        if !file.name.ends_with(".json") {
+            continue;
+        }
+
+        let Some(download_url) = file.download_url else {
+            continue;
+        };
+
+        let file_path = path.join(&file.name);
+
+        match client.get(&download_url).send().await {
+            Ok(resp) => {
+                if !resp.status().is_success() {
+                    warn!("[LOCALE] Failed to fetch {}: {}", file.name, resp.status());
+                    continue;
+                }
+
+                match resp.bytes().await {
+                    Ok(remote_bytes) => {
+                        let remote_hash = md5::compute(&remote_bytes);
+
+                        let local_hash = if file_path.exists() {
+                            match fs::read(&file_path) {
+                                Ok(local_bytes) => Some(md5::compute(local_bytes)),
+                                Err(_) => None,
+                            }
+                        } else {
+                            None
+                        };
+
+                        if local_hash.is_none() || local_hash.unwrap() != remote_hash {
+                            if let Err(e) = fs::write(&file_path, &remote_bytes) {
+                                error!("[LOCALE] Failed to write {}: {}", file.name, e);
+                            } else {
+                                info!("[LOCALE] Updated: {}", file.name);
+                                any_updated = true;
+                            }
+                        } else {
+                            debug!("[LOCALE] {} is up to date", file.name);
+                        }
+                    }
+                    Err(e) => error!("[LOCALE] Failed to read bytes for {}: {}", file.name, e),
+                }
+            }
+            Err(e) => error!("[LOCALE] Network error for {}: {}", file.name, e),
+        }
+    }
+
+    any_updated
+}
+
 pub fn load_locales() {
     let path = Path::new("locales");
     if !path.exists() {
-        eprintln!("[LOCALE] Folder 'locales' not found!");
+        let _ = fs::create_dir(path);
+        warn!("[LOCALE] Folder 'locales' not found (yet). Waiting for download.");
         return;
     }
 
@@ -39,12 +151,12 @@ pub fn load_locales() {
                 if let Ok(content) = fs::read_to_string(&path)
                     && let Ok(json) = serde_json::from_str::<Value>(&content)
                 {
-                    println!("[LOCALE] Loaded: {}", lang_code);
                     store.insert(lang_code, json);
                 }
             }
         }
     }
+    info!("[LOCALE] Locales loaded into memory.");
 }
 
 pub fn get_available_locales() -> Vec<String> {

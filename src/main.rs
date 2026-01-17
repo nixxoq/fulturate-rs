@@ -1,4 +1,7 @@
-use fulturate::{bot::dispatcher::run, util::i18n::load_locales};
+use fulturate::{
+    bot::dispatcher::run,
+    util::i18n::{check_and_update_locales, load_locales},
+};
 use log::{error, info};
 use std::time::Duration;
 use tokio::time::interval;
@@ -11,16 +14,22 @@ async fn main() {
     load_locales();
 
     tokio::spawn(async move {
-        let mut timer = interval(Duration::from_secs(2 * 60 * 60));
+        let mut timer = interval(Duration::from_secs(4 * 60 * 60));
         timer.tick().await;
 
         loop {
             timer.tick().await;
-            info!("[LOCALE] reloading locales...");
-            let _ = tokio::task::spawn_blocking(|| {
-                load_locales();
-            })
-            .await;
+            info!("[LOCALE] Checking GitHub for updates...");
+
+            if check_and_update_locales().await {
+                info!("[LOCALE] Updates detected. Reloading...");
+                let _ = tokio::task::spawn_blocking(|| {
+                    load_locales();
+                })
+                .await;
+            } else {
+                info!("[LOCALE] No updates found.");
+            }
         }
     });
 
