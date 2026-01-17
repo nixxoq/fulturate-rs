@@ -26,7 +26,7 @@ use crate::{
     t,
     util::i18n::{get_user_locale, set_locale},
 };
-use log::{error, info};
+use log::error;
 use std::sync::Arc;
 use teloxide::{
     Bot,
@@ -406,11 +406,6 @@ pub async fn callback_query_handlers(bot: Bot, q: CallbackQuery) -> Result<(), M
             module_key,
             commander_id,
         }) => {
-            info!(
-                "module_select: id: {} | commander_id: {}",
-                q.from.clone().id.0,
-                commander_id
-            );
             if q.from.id.0 != commander_id {
                 bot.answer_callback_query(q.id)
                     .text(t!("errors.no_permission", locale = &locale))
@@ -440,11 +435,6 @@ pub async fn callback_query_handlers(bot: Bot, q: CallbackQuery) -> Result<(), M
             owner_id,
             commander_id,
         }) => {
-            info!(
-                "settings_back: id: {} | commander_id: {}",
-                q.from.clone().id.0,
-                commander_id
-            );
             if q.from.id.0 != commander_id {
                 bot.answer_callback_query(q.id)
                     .text(t!("errors.no_permission", locale = &locale))
@@ -471,11 +461,6 @@ pub async fn callback_query_handlers(bot: Bot, q: CallbackQuery) -> Result<(), M
             rest,
             commander_id,
         }) => {
-            info!(
-                "module_settings: id: {} | commander_id: {}",
-                q.from.clone().id.0,
-                commander_id
-            );
             if q.from.id.0 != commander_id && commander_id != 0 {
                 bot.answer_callback_query(q.id)
                     .text(t!("errors.no_permission", locale = &locale))
