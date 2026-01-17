@@ -8,6 +8,7 @@ use crate::{
         paginator::{FrameBuild, Paginator},
     },
 };
+use std::fmt::Write;
 use teloxide::{
     prelude::*,
     types::{InlineKeyboardButton, InlineKeyboardMarkup, ParseMode, ReplyParameters},
@@ -22,13 +23,9 @@ pub async fn help_handler(
 ) -> Result<(), MyError> {
     let locale = get_chat_locale(&message.chat, config).await;
 
+    let user_id = message.from.as_ref().map(|u| u.id.0).unwrap_or(0);
     let text = generate_help_text(&locale, 0);
-    let keyboard = generate_help_keyboard(
-        0,
-        message.chat.id.0,
-        message.from.as_ref().map(|u| u.id.0).unwrap_or(0),
-        &locale,
-    );
+    let keyboard = generate_help_keyboard(0, message.chat.id.0, user_id, &locale);
 
     bot.send_message(message.chat.id, text)
         .reply_parameters(ReplyParameters::new(message.id))
@@ -40,44 +37,54 @@ pub async fn help_handler(
 }
 
 pub fn generate_help_text(locale: &str, page: usize) -> String {
-    if page == 0 {
-        let mut text = t!("help.header_commands", locale = locale);
-        text.push_str("<blockquote>");
+    let mut text = String::with_capacity(1024);
 
-        for command in Command::bot_commands() {
-            let command_name = if command.command.starts_with("/") {
-                command.command[1..].to_string()
-            } else {
-                command.command.to_string()
-            };
+    match page {
+        0 => {
+            let _ = write!(
+                text,
+                "{}<blockquote>",
+                t!("help.header_commands", locale = locale)
+            );
+            for command in Command::bot_commands() {
+                let name = command
+                    .command
+                    .strip_prefix('/')
+                    .unwrap_or(&command.command);
 
-            let key = format!("commands.{}.desc", command_name);
-            let description = t!(&key, locale = locale);
-            let final_desc = if description == key {
-                command.description
-            } else {
-                description
-            };
+                let key = format!("commands.{}.desc", name);
+                let translated = t!(&key, locale = locale);
 
-            text.push_str(&format!("/{} — {}\n", command_name, final_desc));
+                let description = if translated == key {
+                    command.description.as_str()
+                } else {
+                    &translated
+                };
+
+                let _ = writeln!(text, "/{} — {}", name, description);
+            }
+            text.push_str("</blockquote>");
         }
-
-        text.push_str("</blockquote>");
-        text
-    } else {
-        let mut text = t!("help.header_inline", locale = locale);
-        text.push_str("<blockquote>");
-        text.push_str(&t!("help.guide_cobalt", locale = locale));
-        text.push('\n');
-        text.push_str(&t!("help.guide_currency", locale = locale));
-        text.push('\n');
-        text.push_str(&t!("help.guide_whisper", locale = locale));
-        text.push('\n');
-        text.push_str(&t!("help.guide_translate", locale = locale));
-
-        text.push_str("</blockquote>");
-        text
+        _ => {
+            let _ = write!(
+                text,
+                "{}<blockquote>",
+                t!("help.header_inline", locale = locale)
+            );
+            let guides = [
+                "help.guide_cobalt",
+                "help.guide_currency",
+                "help.guide_whisper",
+                "help.guide_translate",
+            ];
+            for key in guides {
+                let _ = writeln!(text, "{}", t!(key, locale = locale));
+            }
+            text.push_str("</blockquote>");
+        }
     }
+
+    text
 }
 
 pub fn generate_help_keyboard(
@@ -108,9 +115,16 @@ pub async fn handle_help_pagination_callback(
     page: usize,
     target_user_id: u64,
 ) -> Result<(), MyError> {
-    let locale = get_chat_locale(q.message.as_ref().expect("msg").chat(), config).await;
+    let Some(message) = q.message.as_ref().and_then(|m| m.regular_message()) else {
+        bot.answer_callback_query(q.id)
+            .text("⚠️ Message expired")
+            .await?;
+        return Ok(());
+    };
 
-    if q.from.id.0 != target_user_id && target_user_id != 0 {
+    let locale = get_chat_locale(&message.chat, config).await;
+
+    if target_user_id != 0 && q.from.id.0 != target_user_id {
         bot.answer_callback_query(q.id)
             .text(t!("errors.no_permission", locale = &locale))
             .show_alert(true)
@@ -120,17 +134,12 @@ pub async fn handle_help_pagination_callback(
 
     let text = generate_help_text(&locale, page);
 
-    let chat_id = q.message.as_ref().map(|m| m.chat().id.0).unwrap_or(0);
-    let keyboard = generate_help_keyboard(page, chat_id, target_user_id, &locale);
+    let keyboard = generate_help_keyboard(page, message.chat.id.0, target_user_id, &locale);
 
-    bot.edit_message_text(
-        q.message.as_ref().expect("msg").chat().id,
-        q.message.as_ref().expect("msg").id(),
-        text,
-    )
-    .reply_markup(keyboard)
-    .parse_mode(ParseMode::Html)
-    .await?;
+    bot.edit_message_text(message.chat.id, message.id, text)
+        .reply_markup(keyboard)
+        .parse_mode(ParseMode::Html)
+        .await?;
 
     bot.answer_callback_query(q.id).await?;
 
