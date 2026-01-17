@@ -59,9 +59,9 @@ pub async fn start_handler(
         }
     }
 
-    if arg == "register" {
-        return Ok(());
-    }
+    // if arg == "register" {
+    //     return Ok(());
+    // }
 
     let settings_data = format!(
         "settings_main:user:{}:{}",
