@@ -17,6 +17,7 @@ use crate::{
     core::{
         config::Config,
         db::schemas::{settings::Settings, user::User as DBUser},
+        metrics::{ERRORS_COUNTER, INCOMING_UPDATES},
     },
     errors::MyError,
     t,
@@ -53,6 +54,8 @@ async fn root_handler(
     logic: Arc<Handler<'static, Result<(), MyError>, DpHandlerDescription>>,
     me: Me,
 ) -> Result<(), Infallible> {
+    INCOMING_UPDATES.inc();
+
     let deps = dptree::deps![update.clone(), config.clone(), bot.clone(), me.clone()];
     let result = logic.dispatch(deps).await;
 
@@ -311,6 +314,8 @@ pub async fn handle_error(err: Arc<MyError>, update: Update, config: Arc<Config>
     if format!("{:?}", err).contains("query is too old") {
         return;
     }
+
+    ERRORS_COUNTER.with_label_values(&["generic_error"]).inc();
 
     error!("Error: {:#}", err);
 

@@ -1,5 +1,6 @@
 use fulturate::{
     bot::dispatcher::run,
+    core::metrics::run_metrics_server,
     util::i18n::{check_and_update_locales, load_locales},
 };
 use log::{error, info};
@@ -31,6 +32,10 @@ async fn main() {
                 info!("[LOCALE] No updates found.");
             }
         }
+    });
+
+    let _ = tokio::task::spawn_blocking(|| {
+        tokio::runtime::Handle::current().block_on(run_metrics_server())
     });
 
     info!("Bot starting...");
