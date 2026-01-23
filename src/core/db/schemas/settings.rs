@@ -14,6 +14,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
 
+fn default_true() -> bool {
+    // true to true by true because true from true is true...
+    true
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Model)]
 #[db("fulturate")]
 #[collection("settings")]
@@ -27,6 +32,9 @@ pub struct Settings {
 
     #[serde(default)]
     pub language: String,
+
+    #[serde(default = "default_true")]
+    pub admin_only_mode: bool,
 
     #[serde(default)]
     pub modules: BTreeMap<String, Value>,
@@ -57,6 +65,7 @@ impl Settings {
             .owner_id(owner.id.clone())
             .owner_type(owner.r#type.clone())
             .language(language.clone())
+            .admin_only_mode(true)
             .modules(modules_map);
 
         new_doc.save().await?;
@@ -105,6 +114,19 @@ impl Settings {
         Ok(())
     }
 
+    pub async fn toggle_admin_mode(owner: &Owner) -> Result<bool, MyError> {
+        let settings = Self::get_or_create(owner).await?;
+        let new_state = !settings.admin_only_mode;
+
+        Self::update_one(
+            doc! { "owner_id": &owner.id, "owner_type": &owner.r#type },
+            doc! { "$set": { "admin_only_mode": new_state } },
+        )
+        .await?;
+
+        Ok(new_state)
+    }
+
     pub(crate) async fn get_or_create(owner: &Owner) -> Result<Self, MyError> {
         let query = Self::query()
             .filter("owner_id", &owner.id)
@@ -114,6 +136,21 @@ impl Settings {
             return Ok(doc);
         }
 
-        Self::create_with_defaults(owner, "en".to_string()).await
+        match Self::create_with_defaults(owner, "en".to_string()).await {
+            // todo: fix duplicate key issue
+            Ok(doc) => Ok(doc),
+            Err(e) => {
+                if e.to_string().contains("E11000") {
+                    let query_retry = Self::query()
+                        .filter("owner_id", &owner.id)
+                        .filter("owner_type", &owner.r#type);
+
+                    if let Some(doc) = query_retry.first().await? {
+                        return Ok(doc);
+                    }
+                }
+                Err(e)
+            }
+        }
     }
 }

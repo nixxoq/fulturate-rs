@@ -71,6 +71,7 @@
     "btn_modules": "🧩 Modules",
     "btn_language": "🏳️ Language",
     "btn_delete_data": "🗑️ Delete Data",
+    "btn_admin_only": "🔐 Admins Only: %{status}",
     "modules_header": "⚙️ <b>Module Settings</b>\n\nClick a button to enable or disable the corresponding module.\n✅ – module enabled\n❌ – module disabled\n\n",
     "lang_header": "🏳️ <b>Language Settings</b>\n\nSelect the interface language:",
     "lang_selected_alert": "✅ Language changed to English.",

@@ -1,4 +1,5 @@
 use crate::bot::commands::help::handle_help_pagination_callback;
+use crate::core::db::schemas::settings::Settings;
 use crate::util::i18n::get_locale_by_owner;
 use crate::{
     bot::{
@@ -43,6 +44,11 @@ pub mod whisper;
 
 enum CallbackAction<'a> {
     SettingsMain {
+        owner_type: &'a str,
+        owner_id: &'a str,
+        commander_id: u64,
+    },
+    ToggleAdminOnly {
         owner_type: &'a str,
         owner_id: &'a str,
         commander_id: u64,
@@ -116,6 +122,19 @@ fn parse_callback_data(data: &'_ str) -> Option<CallbackAction<'_>> {
             && let Ok(commander_id) = parts[2].parse()
         {
             return Some(CallbackAction::SettingsMain {
+                owner_type: parts[0],
+                owner_id: parts[1],
+                commander_id,
+            });
+        }
+    }
+
+    if let Some(rest) = data.strip_prefix("settings_toggle_admin:") {
+        let parts: Vec<_> = rest.split(':').collect();
+        if parts.len() == 3
+            && let Ok(commander_id) = parts[2].parse()
+        {
+            return Some(CallbackAction::ToggleAdminOnly {
                 owner_type: parts[0],
                 owner_id: parts[1],
                 commander_id,
@@ -308,11 +327,81 @@ pub async fn callback_query_handlers(bot: Bot, q: CallbackQuery) -> Result<(), M
 
             locale = get_locale_by_owner(owner_id, owner_type, &config).await;
 
+            let owner = Owner {
+                id: owner_id.to_string(),
+                r#type: owner_type.to_string(),
+            };
+
+            let settings = Settings::get_or_create(&owner).await?;
+            if let Some(MaybeInaccessibleMessage::Regular(msg)) = &q.message {
+                if (msg.chat.is_group() || msg.chat.is_supergroup()) && settings.admin_only_mode {
+                    let member = bot.get_chat_member(msg.chat.id, q.from.id).await?;
+                    if !member.is_privileged() {
+                        bot.answer_callback_query(q.id)
+                            .text(t!("errors.no_permission", locale = &locale))
+                            .show_alert(true)
+                            .await?;
+                        return Ok(());
+                    }
+                }
+            }
+
             let Some(MaybeInaccessibleMessage::Regular(msg)) = q.message else {
                 return Ok(());
             };
 
-            let (text, kb) = get_main_settings_menu(&locale, owner_type, owner_id, commander_id);
+            let (text, kb) = get_main_settings_menu(
+                &locale,
+                owner_type,
+                owner_id,
+                commander_id,
+                settings.admin_only_mode,
+            );
+            bot.edit_message_text(msg.chat.id, msg.id, text)
+                .reply_markup(kb)
+                .parse_mode(teloxide::types::ParseMode::Html)
+                .await?;
+        }
+        Some(CallbackAction::ToggleAdminOnly {
+            owner_type,
+            owner_id,
+            commander_id,
+        }) => {
+            if q.from.id.0 != commander_id {
+                bot.answer_callback_query(q.id)
+                    .text(t!("errors.no_permission", locale = &locale))
+                    .show_alert(true)
+                    .await?;
+                return Ok(());
+            }
+
+            if let Some(MaybeInaccessibleMessage::Regular(msg)) = &q.message {
+                if msg.chat.is_group() || msg.chat.is_supergroup() {
+                    let member = bot.get_chat_member(msg.chat.id, q.from.id).await?;
+                    if !member.is_privileged() {
+                        bot.answer_callback_query(q.id)
+                            .text(t!("errors.no_permission", locale = &locale))
+                            .show_alert(true)
+                            .await?;
+                        return Ok(());
+                    }
+                }
+            }
+
+            let owner = Owner {
+                id: owner_id.to_string(),
+                r#type: owner_type.to_string(),
+            };
+
+            let new_state = Settings::toggle_admin_mode(&owner).await?;
+            locale = get_locale_by_owner(owner_id, owner_type, &config).await;
+
+            let Some(MaybeInaccessibleMessage::Regular(msg)) = q.message else {
+                return Ok(());
+            };
+
+            let (text, kb) =
+                get_main_settings_menu(&locale, owner_type, owner_id, commander_id, new_state);
             bot.edit_message_text(msg.chat.id, msg.id, text)
                 .reply_markup(kb)
                 .parse_mode(teloxide::types::ParseMode::Html)
@@ -368,7 +457,19 @@ pub async fn callback_query_handlers(bot: Bot, q: CallbackQuery) -> Result<(), M
                 return Ok(());
             };
 
-            let (text, kb) = get_main_settings_menu(&locale, owner_type, owner_id, commander_id);
+            let owner = Owner {
+                id: owner_id.to_string(),
+                r#type: owner_type.to_string(),
+            };
+            let settings = Settings::get_or_create(&owner).await?;
+
+            let (text, kb) = get_main_settings_menu(
+                &locale,
+                owner_type,
+                owner_id,
+                commander_id,
+                settings.admin_only_mode,
+            );
             bot.edit_message_text(msg.chat.id, msg.id, text)
                 .reply_markup(kb)
                 .parse_mode(teloxide::types::ParseMode::Html)
