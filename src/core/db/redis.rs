@@ -3,7 +3,7 @@ use serde::{Serialize, de::DeserializeOwned};
 
 #[derive(Clone)]
 pub struct RedisCache {
-    client: Client,
+    pub client: Client,
 }
 
 impl RedisCache {

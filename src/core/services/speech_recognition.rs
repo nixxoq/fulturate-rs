@@ -6,7 +6,10 @@ use crate::{
         },
         modules::{Owner, speech_recognition::SpeechRecognitionSettings},
     },
-    core::{config::Config, db::schemas::settings::Settings as DbSettings},
+    core::{
+        config::Config,
+        db::schemas::{settings::Settings as DbSettings, user::User},
+    },
     errors::{BotError, MyError},
     t,
     util::{enums::AudioStruct, i18n::get_chat_locale, split_text},
@@ -19,15 +22,30 @@ use gem_rs::{
     types::{FileManager, HarmBlockThreshold, Role, Settings},
 };
 use log::{debug, error, info};
+use redis::AsyncCommands;
 use redis_macros::{FromRedisValue, ToRedisArgs};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use teloxide::{
     prelude::*,
-    types::{FileId, MessageKind, ParseMode, ReplyParameters},
+    types::{FileId, MessageId, MessageKind, ParseMode, ReplyParameters},
     utils::html,
 };
+
+const QUEUE_LIMIT_FREE: usize = 2;
+const QUEUE_LIMIT_PREMIUM: usize = 30;
+const REDIS_QUEUE_FREE: &str = "sr_queue:free";
+const REDIS_QUEUE_PREMIUM: &str = "sr_queue:premium";
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct SpeechJob {
+    pub chat_id: ChatId,
+    pub message_id: MessageId,
+    pub user_id: u64,
+    pub file_info: AudioStruct,
+    pub settings: SpeechRecognitionSettings,
+}
 
 #[derive(Debug, Serialize, Deserialize, FromRedisValue, ToRedisArgs, Clone)]
 pub struct TranscriptionCache {
@@ -43,6 +61,273 @@ pub struct Transcription {
     pub(crate) data: Bytes,
     pub(crate) config: Config,
     pub(crate) custom_model: String,
+}
+
+pub async fn run_speech_worker(bot: Bot, config: Config) {
+    info!("Speech worker started");
+    let mut con = match config
+        .get_redis_client()
+        .client
+        .get_multiplexed_tokio_connection()
+        .await
+    {
+        Ok(c) => c,
+        Err(e) => {
+            error!("Failed to connect to Redis in worker: {}", e);
+            return;
+        }
+    };
+
+    loop {
+        let job_data: Option<String> =
+            match con.lpop::<_, Vec<String>>(REDIS_QUEUE_PREMIUM, None).await {
+                Ok(mut items) => items.pop(),
+                Err(e) => {
+                    error!("Redis error popping premium queue: {}", e);
+                    None
+                }
+            };
+
+        let job_data = if job_data.is_some() {
+            job_data
+        } else {
+            match con.lpop::<_, Vec<String>>(REDIS_QUEUE_FREE, None).await {
+                Ok(mut items) => items.pop(),
+                Err(e) => {
+                    error!("Redis error popping free queue: {}", e);
+                    None
+                }
+            }
+        };
+
+        if let Some(json) = job_data {
+            match serde_json::from_str::<SpeechJob>(&json) {
+                Ok(job) => {
+                    let bot_clone = bot.clone();
+                    let config_clone = config.clone();
+
+                    if let Err(e) = process_speech_job(bot_clone, config_clone, job).await {
+                        error!("Failed to process speech job: {}", e);
+                    }
+                }
+                Err(e) => error!("Failed to deserialize speech job: {}", e),
+            }
+        } else {
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+    }
+}
+
+async fn process_speech_job(bot: Bot, config: Config, job: SpeechJob) -> Result<(), MyError> {
+    let locale = get_chat_locale(
+        &teloxide::types::Chat {
+            id: job.chat_id,
+            kind: teloxide::types::ChatKind::Private(teloxide::types::ChatPrivate {
+                username: None,
+                first_name: None,
+                last_name: None,
+            }),
+        },
+        &config,
+    )
+    .await;
+
+    let processing_msg = bot
+        .send_message(
+            job.chat_id,
+            t!("speech.processing_started", locale = &locale),
+        )
+        .reply_parameters(ReplyParameters::new(job.message_id))
+        .await?;
+
+    let cache = config.get_redis_client();
+
+    let message_file_map_key = format!("message_file_map:{}", processing_msg.id);
+    cache
+        .set(&message_file_map_key, &job.file_info.file_unique_id, 86400)
+        .await?;
+
+    let model_key = job.settings.transcription_model.api_key().to_string();
+
+    match get_cached(&bot, &job.file_info, &config, false, model_key, &locale).await {
+        Ok(cache_entry) => {
+            let text_parts = split_text(&cache_entry.full_text, 4000);
+            if text_parts.is_empty() {
+                bot.edit_message_text(
+                    job.chat_id,
+                    processing_msg.id,
+                    t!("speech.error_empty", locale = &locale),
+                )
+                .await?;
+                return Ok(());
+            }
+
+            let keyboard = create_transcription_keyboard(0, text_parts.len(), job.user_id, &locale);
+
+            bot.edit_message_text(
+                job.chat_id,
+                processing_msg.id,
+                format!(
+                    "<blockquote expandable>{}</blockquote>",
+                    html::escape(&text_parts[0])
+                ),
+            )
+            .parse_mode(ParseMode::Html)
+            .reply_markup(keyboard)
+            .await?;
+        }
+        Err(e) => {
+            error!("Processing failed for chat {}: {:?}", job.chat_id, e);
+            let error_text = t!("speech.error_processing", locale = &locale);
+            let retry_keyboard = create_retry_keyboard(job.message_id.0, "transcribe", 0, &locale);
+
+            bot.edit_message_text(job.chat_id, processing_msg.id, error_text)
+                .reply_markup(retry_keyboard)
+                .await?;
+        }
+    }
+
+    Ok(())
+}
+
+pub async fn transcription_handler(
+    bot: Bot,
+    msg: &Message,
+    config: &Config,
+) -> Result<(), MyError> {
+    let locale = get_chat_locale(&msg.chat, config).await;
+
+    let owner = Owner {
+        id: msg.chat.id.to_string(),
+        r#type: if msg.chat.is_private() {
+            "user".to_string()
+        } else {
+            "group".to_string()
+        },
+    };
+
+    let settings: SpeechRecognitionSettings = DbSettings::get_module_settings(&owner, "speech")
+        .await
+        .unwrap_or_default();
+
+    if !settings.enabled {
+        return Ok(());
+    }
+
+    let is_allowed = if msg.voice().is_some() {
+        settings.enable_voice
+    } else if msg.video_note().is_some() {
+        settings.enable_video_note
+    } else if msg.audio().is_some() {
+        settings.enable_audio
+    } else {
+        false
+    };
+
+    if !is_allowed {
+        return Ok(());
+    }
+
+    let Some(user) = msg.from.as_ref() else {
+        return Ok(());
+    };
+    let is_premium = User::check_premium(&user.id.0.to_string()).await;
+
+    if let Some(file_info) = get_file_id(msg).await {
+        let cache_client = config.get_redis_client();
+        let file_cache_key = format!("transcription_by_file:{}", &file_info.file_unique_id);
+
+        if let Ok(Some(cached)) = cache_client
+            .get::<TranscriptionCache>(&file_cache_key)
+            .await
+        {
+            if !cached.full_text.is_empty() {
+                let text_parts = split_text(&cached.full_text, 4000);
+
+                let sent_msg = bot
+                    .send_message(
+                        msg.chat.id,
+                        format!(
+                            "<blockquote expandable>{}</blockquote>",
+                            html::escape(&text_parts[0])
+                        ),
+                    )
+                    .reply_parameters(ReplyParameters::new(msg.id))
+                    .parse_mode(ParseMode::Html)
+                    .reply_markup(create_transcription_keyboard(
+                        0,
+                        text_parts.len(),
+                        user.id.0,
+                        &locale,
+                    ))
+                    .await?;
+
+                let message_file_map_key = format!("message_file_map:{}", sent_msg.id);
+                cache_client
+                    .set(&message_file_map_key, &file_info.file_unique_id, 86400)
+                    .await?;
+
+                return Ok(());
+            }
+        }
+
+        let (queue_key, limit) = if is_premium {
+            (REDIS_QUEUE_PREMIUM, QUEUE_LIMIT_PREMIUM)
+        } else {
+            (REDIS_QUEUE_FREE, QUEUE_LIMIT_FREE)
+        };
+
+        let mut con = config
+            .get_redis_client()
+            .client
+            .get_multiplexed_tokio_connection()
+            .await?;
+        let queue_len: usize = con.llen(queue_key).await?;
+
+        if queue_len >= limit {
+            bot.send_message(
+                msg.chat.id,
+                t!(
+                    "speech.queue_full",
+                    locale = &locale,
+                    count = queue_len,
+                    limit = limit
+                ),
+            )
+            .reply_parameters(ReplyParameters::new(msg.id))
+            .await?;
+            return Ok(());
+        }
+
+        let job = SpeechJob {
+            chat_id: msg.chat.id,
+            message_id: msg.id,
+            user_id: user.id.0,
+            file_info,
+            settings,
+        };
+
+        let job_json = serde_json::to_string(&job)?;
+        let _: () = con.rpush(queue_key, job_json).await?;
+
+        bot.send_message(
+            msg.chat.id,
+            t!(
+                "speech.added_to_queue",
+                locale = &locale,
+                pos = queue_len + 1
+            ),
+        )
+        .reply_parameters(ReplyParameters::new(msg.id))
+        .parse_mode(ParseMode::Html)
+        .await?;
+    } else {
+        bot.send_message(msg.chat.id, t!("speech.audio_not_found", locale = &locale))
+            .reply_parameters(ReplyParameters::new(msg.id))
+            .await?;
+    }
+
+    Ok(())
 }
 
 pub async fn pagination_handler(
@@ -394,119 +679,6 @@ async fn get_cached(
     Ok(new_cache_entry)
 }
 
-pub async fn transcription_handler(
-    bot: Bot,
-    msg: &Message,
-    config: &Config,
-) -> Result<(), MyError> {
-    let locale = get_chat_locale(&msg.chat, config).await;
-
-    let owner = Owner {
-        id: msg.chat.id.to_string(),
-        r#type: if msg.chat.is_private() {
-            "user".to_string()
-        } else {
-            "group".to_string()
-        },
-    };
-
-    let settings: SpeechRecognitionSettings = DbSettings::get_module_settings(&owner, "speech")
-        .await
-        .unwrap_or_default();
-
-    if !settings.enabled {
-        return Ok(());
-    }
-
-    let is_allowed = if msg.voice().is_some() {
-        settings.enable_voice
-    } else if msg.video_note().is_some() {
-        settings.enable_video_note
-    } else if msg.audio().is_some() {
-        settings.enable_audio
-    } else {
-        false
-    };
-
-    if !is_allowed {
-        return Ok(());
-    }
-
-    let message = bot
-        .send_message(msg.chat.id, t!("speech.processing", locale = &locale))
-        .reply_parameters(ReplyParameters::new(msg.id))
-        .parse_mode(ParseMode::Html)
-        .await
-        .ok();
-
-    let Some(message) = message else {
-        return Ok(());
-    };
-    let Some(user) = msg.from.as_ref() else {
-        return Ok(());
-    };
-
-    if let Some(file) = get_file_id(msg).await {
-        let cache = config.get_redis_client();
-        let message_file_map_key = format!("message_file_map:{}", message.id);
-
-        cache
-            .set(&message_file_map_key, &file.file_unique_id, 86400)
-            .await?;
-
-        let file_cache_key = format!("transcription_by_file:{}", &file.file_unique_id);
-        let empty_cache = TranscriptionCache {
-            full_text: String::new(),
-            summary: None,
-            file_id: file.file_id.clone(),
-            mime_type: file.mime_type.clone(),
-            attempt: 0,
-        };
-        cache.set(&file_cache_key, &empty_cache, 86400).await?;
-
-        let model_key = settings.transcription_model.api_key().to_string();
-
-        match get_cached(&bot, &file, config, false, model_key, &locale).await {
-            Ok(cache_entry) => {
-                let text_parts = split_text(&cache_entry.full_text, 4000);
-                if text_parts.is_empty() {
-                    return Ok(());
-                }
-
-                let keyboard =
-                    create_transcription_keyboard(0, text_parts.len(), user.id.0, &locale);
-                bot.edit_message_text(
-                    msg.chat.id,
-                    message.id,
-                    format!(
-                        "<blockquote expandable>{}</blockquote>",
-                        html::escape(&text_parts[0])
-                    ),
-                )
-                .parse_mode(ParseMode::Html)
-                .reply_markup(keyboard)
-                .await?;
-            }
-            Err(e) => {
-                error!("Failed to get transcription: {:?}", e);
-                let error_text = t!("speech.error_processing", locale = &locale);
-                let retry_keyboard = create_retry_keyboard(msg.id.0, "transcribe", 0, &locale);
-                bot.edit_message_text(message.chat.id, message.id, error_text)
-                    .reply_markup(retry_keyboard)
-                    .await?;
-            }
-        }
-    } else {
-        bot.edit_message_text(
-            message.chat.id,
-            message.id,
-            t!("speech.audio_not_found", locale = &locale),
-        )
-        .await?;
-    }
-    Ok(())
-}
-
 pub async fn retry_speech_handler(
     bot: Bot,
     query: CallbackQuery,
@@ -830,7 +1002,6 @@ impl Transcription {
         settings.set_all_safety_settings(HarmBlockThreshold::BlockNone);
 
         let error_answer = t!("speech.error_transcription", locale = locale);
-        // let ai_model = self.config.get_json_config().get_ai_model().to_owned();
         let prompt = self.config.get_json_config().get_ai_prompt().to_owned();
         settings.set_system_instruction(&prompt);
 

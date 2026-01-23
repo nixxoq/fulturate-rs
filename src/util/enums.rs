@@ -1,5 +1,7 @@
 use crate::t;
 use ccobalt::model::error::CobaltError;
+use serde::Deserialize;
+use serde::Serialize;
 use teloxide::{
     types::{InlineQueryResultArticle, InputMessageContent, InputMessageContentText},
     utils::command::BotCommands,
@@ -25,6 +27,7 @@ pub enum Command {
     Broadcast,
 }
 
+#[derive(Serialize, Deserialize, Debug)]
 pub struct AudioStruct {
     pub mime_type: String,
     pub file_id: String,

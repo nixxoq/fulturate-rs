@@ -195,7 +195,10 @@
     "audio_not_found": "❌ Source audio not found.",
     "error_retry": "❌ Error during retry.",
     "error_processing": "❌ Error processing audio.",
-    "error_transcription": "❌ Failed to transcribe text from message."
+    "error_transcription": "❌ Failed to transcribe text from message.",
+    "queue_full": "❌ The processing queue is full (%{count}/%{limit}). Please try again later.",
+    "added_to_queue": "⏳ Added to queue. Position: %{pos}.",
+    "processing_started": "🔄 Starting processing..."
   },
   "translate": {
     "cache_expired": "Translation cache expired. Please translate again.",

@@ -1,6 +1,9 @@
 use fulturate::{
     bot::dispatcher::run,
-    core::metrics::run_metrics_server,
+    core::{
+        config::Config, metrics::run_metrics_server,
+        services::speech_recognition::run_speech_worker,
+    },
     util::i18n::{check_and_update_locales, load_locales},
 };
 use log::{error, info};
@@ -36,6 +39,14 @@ async fn main() {
 
     let _ = tokio::task::spawn_blocking(|| {
         tokio::runtime::Handle::current().block_on(run_metrics_server())
+    });
+
+    let config = Config::new().await;
+    let bot = config.get_bot().clone();
+    let config_clone = config.clone();
+
+    tokio::spawn(async move {
+        run_speech_worker(bot, config_clone).await;
     });
 
     info!("Bot starting...");
