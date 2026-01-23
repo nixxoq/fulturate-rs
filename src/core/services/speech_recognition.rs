@@ -33,8 +33,8 @@ use teloxide::{
     utils::html,
 };
 
-const QUEUE_LIMIT_FREE: usize = 2;
-const QUEUE_LIMIT_PREMIUM: usize = 30;
+const QUEUE_LIMIT_FREE: usize = 2; // todo: 15
+const QUEUE_LIMIT_PREMIUM: usize = 50;
 const REDIS_QUEUE_FREE: &str = "sr_queue:free";
 const REDIS_QUEUE_PREMIUM: &str = "sr_queue:premium";
 
