@@ -39,6 +39,7 @@ use teloxide::{
 pub mod admin;
 pub mod cobalt_pagination;
 pub mod delete;
+pub mod refactor;
 pub mod translate;
 pub mod whisper;
 
@@ -109,6 +110,10 @@ enum CallbackAction<'a> {
     },
     Admin,
     NoOp,
+    Refactor {
+        mode: &'a str,
+        src_msg_id: i32,
+    },
 }
 
 fn parse_callback_data(data: &'_ str) -> Option<CallbackAction<'_>> {
@@ -297,6 +302,18 @@ fn parse_callback_data(data: &'_ str) -> Option<CallbackAction<'_>> {
 
     if data.starts_with("admin:") {
         return Some(CallbackAction::Admin);
+    }
+
+    if let Some(rest) = data.strip_prefix("refactor:") {
+        let parts: Vec<_> = rest.split(':').collect();
+        if parts.len() == 2
+            && let Ok(id) = parts[1].parse()
+        {
+            return Some(CallbackAction::Refactor {
+                mode: parts[0],
+                src_msg_id: id,
+            });
+        }
     }
 
     None
@@ -661,6 +678,9 @@ pub async fn callback_query_handlers(bot: Bot, q: CallbackQuery) -> Result<(), M
         }
         Some(CallbackAction::NoOp) => {
             bot.answer_callback_query(q.id).await?;
+        }
+        Some(CallbackAction::Refactor { mode, src_msg_id }) => {
+            refactor::handle_refactor_callback(bot, q, &config, mode, src_msg_id).await?
         }
         None => {
             log::warn!("Unhandled callback query data: {}", data);

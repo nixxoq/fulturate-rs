@@ -2,6 +2,7 @@ use crate::{
     bot::commands::{
         admin::{admin_command_handler, broadcast_command_handler},
         help::help_handler,
+        refactor::{refactor_command_handler, understand_command_handler},
         settings::settings_command_handler,
         speech_recognition::speech_recognition_handler,
         start::start_handler,
@@ -25,6 +26,8 @@ pub async fn command_handlers(bot: Bot, message: Message, cmd: Command) -> Resul
             Command::Settings => "settings",
             Command::Admin => "admin",
             Command::Broadcast => "broadcast",
+            Command::Refactor => "refactor",
+            Command::Understand => "understand",
         };
         COMMANDS_COUNTER.with_label_values(&[command_name]).inc();
 
@@ -37,6 +40,9 @@ pub async fn command_handlers(bot: Bot, message: Message, cmd: Command) -> Resul
 
             Command::Admin => admin_command_handler(bot, message, &config).await,
             Command::Broadcast => broadcast_command_handler(bot, message, &config).await,
+
+            Command::Refactor => refactor_command_handler(bot, message, &config).await,
+            Command::Understand => understand_command_handler(bot, message, &config).await,
         }
     });
     Ok(())

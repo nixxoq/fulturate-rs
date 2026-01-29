@@ -4,6 +4,7 @@ use teloxide::types::{ChatMemberKind, Recipient, User};
 
 pub mod currency_values;
 pub mod enums;
+pub mod html;
 pub mod i18n;
 pub mod paginator;
 

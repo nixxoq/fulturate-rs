@@ -4,6 +4,7 @@ pub mod macros;
 pub mod cobalt;
 pub mod currency;
 pub mod math;
+pub mod refactor;
 pub mod registry;
 pub mod speech_recognition;
 pub mod translate;

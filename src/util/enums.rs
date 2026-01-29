@@ -25,6 +25,11 @@ pub enum Command {
     Admin,
     #[command(description = "Broadcast message (reply only)", hide)]
     Broadcast,
+
+    #[command(description = "Refactor text", alias = "edit")]
+    Refactor,
+    #[command(description = "Understand text", alias = "explain")]
+    Understand,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
