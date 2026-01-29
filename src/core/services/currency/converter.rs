@@ -7,7 +7,8 @@ use crate::{
 };
 use aho_corasick::{AhoCorasick, MatchKind};
 use async_trait::async_trait;
-use log::error;
+use eidolon_lang::interpreter::evaluate;
+use log::{error, warn};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -29,6 +30,8 @@ const BANNED_CHARACTERS: [char; 6] = ['@', '#', '/', '_', ':', '-'];
 pub struct DetectedCurrency {
     amount: f64,
     currency_code: String,
+    start: usize,
+    end: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -44,7 +47,6 @@ trait RateProvider: Send + Sync {
 
 struct CoinbaseProvider;
 
-// Coinbase Provider output
 #[derive(Deserialize)]
 struct CbResponse {
     data: Cbdata,
@@ -70,10 +72,10 @@ impl RateProvider for CoinbaseProvider {
         rates.insert(resp.data.currency, 1.0);
 
         for (code, rate_str) in resp.data.rates {
-            if let Ok(rate) = rate_str.parse::<f64>()
-                && rate != 0.0
-            {
-                rates.insert(code, 1.0 / rate);
+            if let Ok(rate) = rate_str.parse::<f64>() {
+                if rate != 0.0 {
+                    rates.insert(code, 1.0 / rate);
+                }
             }
         }
         Ok(rates)
@@ -85,7 +87,6 @@ struct TonApiProvider {
     mapping: HashMap<String, String>,
 }
 
-// TonApi response
 #[derive(Deserialize)]
 struct TonApiResponse {
     rates: HashMap<String, TonApiRate>,
@@ -115,16 +116,18 @@ impl RateProvider for TonApiProvider {
 
         let mut rates = HashMap::new();
         for (id, rate_entry) in resp.rates {
-            if let Some(code) = self.mapping.get(&id) {
-                if let Some(price) = rate_entry.prices.get("UAH") {
-                    rates.insert(code.clone(), *price);
-                } else if let Some(price) = rate_entry.prices.get("uah") {
+            let code_opt = self
+                .mapping
+                .get(&id)
+                .or_else(|| self.mapping.get(&id.to_lowercase()));
+            if let Some(code) = code_opt {
+                if let Some(price) = rate_entry
+                    .prices
+                    .get("UAH")
+                    .or_else(|| rate_entry.prices.get("uah"))
+                {
                     rates.insert(code.clone(), *price);
                 }
-            } else if let Some(code) = self.mapping.get(&id.to_lowercase())
-                && let Some(price) = rate_entry.prices.get("UAH")
-            {
-                rates.insert(code.clone(), *price);
             }
         }
         Ok(rates)
@@ -180,90 +183,109 @@ impl CurrencyDetector {
 
     fn detect(&self, text: &str) -> Vec<DetectedCurrency> {
         let text_lower = text.to_lowercase();
+        let mut results = Vec::new();
 
-        self.ac
-            .find_iter(&text_lower)
-            .filter_map(|mat| {
-                let code = &self.pattern_map[mat.pattern()];
-                let (start, end) = (mat.start(), mat.end());
-                let match_str = &text_lower[start..end];
+        for mat in self.ac.find_iter(&text_lower) {
+            let code = &self.pattern_map[mat.pattern()];
+            let (start, end) = (mat.start(), mat.end());
+            let match_str = &text_lower[start..end];
 
-                let is_alpha = match_str.chars().any(char::is_alphabetic);
-                let char_count = match_str.chars().count();
+            let is_alpha = match_str.chars().any(char::is_alphabetic);
+            let char_count = match_str.chars().count();
 
-                if is_alpha {
-                    let prev = text_lower[..start].chars().last();
-                    let next = text_lower[end..].chars().next();
+            if is_alpha {
+                let prev = text_lower[..start].chars().last();
+                let next = text_lower[end..].chars().next();
 
-                    if prev.is_some_and(char::is_alphabetic)
-                        || next.is_some_and(char::is_alphabetic)
-                    {
-                        return None;
-                    }
-
-                    if let (Some(p), Some(n)) = (prev, next)
-                        && p.is_alphanumeric()
-                        && n.is_alphanumeric()
-                    {
-                        return None;
-                    }
+                if prev.is_some_and(char::is_alphabetic) || next.is_some_and(char::is_alphabetic) {
+                    continue;
                 }
 
-                let (left_part, right_part) = (&text[..start], &text[end..]);
+                if let (Some(p), Some(n)) = (prev, next) {
+                    if p.is_alphanumeric() && n.is_alphanumeric() {
+                        continue;
+                    }
+                }
+            }
 
-                // TODO: should we make this crutch configurable in settings? If yes, this option will be named like "Value depth"
-                let amount = if is_alpha && char_count == 1 {
-                    Self::find_strict(left_part, right_part)
-                } else {
-                    let limit = if is_alpha && char_count == 2 { 1 } else { 5 };
-                    Self::find_loose(left_part, right_part, limit)
-                };
+            let (left_part, right_part) = (&text[..start], &text[end..]);
 
-                amount.map(|amount| DetectedCurrency {
+            let amount_data = if is_alpha && char_count == 1 {
+                Self::find_strict_with_range(left_part, right_part, start, end)
+            } else {
+                let limit = if is_alpha && char_count == 2 { 1 } else { 5 };
+                Self::find_loose_with_range(left_part, right_part, limit, start, end)
+            };
+
+            if let Some((amount, f_start, f_end)) = amount_data {
+                results.push(DetectedCurrency {
                     amount,
                     currency_code: code.clone(),
-                })
-            })
-            .collect()
+                    start: f_start,
+                    end: f_end,
+                });
+            }
+        }
+        results
     }
 
-    fn find_strict(left: &str, right: &str) -> Option<f64> {
-        if let Some(token) = left.split_whitespace().last()
-            && !left.chars().last().is_some_and(|c| c.is_ascii_digit())
-            && !token.starts_with(&BANNED_CHARACTERS[..])
-            && let Some(value) = Self::parse_amount(token)
-        {
-            return Some(value);
+    fn find_strict_with_range(
+        left: &str,
+        right: &str,
+        s_idx: usize,
+        e_idx: usize,
+    ) -> Option<(f64, usize, usize)> {
+        if let Some(token) = left.split_whitespace().last() {
+            if !left.chars().last().is_some_and(|c| c.is_ascii_digit())
+                && !token.starts_with(&BANNED_CHARACTERS[..])
+            {
+                if let Some(value) = Self::parse_amount(token) {
+                    let pos = left.rfind(token).unwrap_or(0);
+                    return Some((value, pos, e_idx));
+                }
+            }
         }
 
-        if let Some(token) = right.split_whitespace().next()
-            && !right.chars().next().is_some_and(|c| c.is_ascii_digit())
-            && !token.starts_with(&BANNED_CHARACTERS[..])
-            && let Some(value) = Self::parse_amount(token)
-        {
-            return Some(value);
+        if let Some(token) = right.split_whitespace().next() {
+            if !right.chars().next().is_some_and(|c| c.is_ascii_digit())
+                && !token.starts_with(&BANNED_CHARACTERS[..])
+            {
+                if let Some(value) = Self::parse_amount(token) {
+                    let pos = right.find(token).unwrap_or(0);
+                    return Some((value, s_idx, e_idx + pos + token.len()));
+                }
+            }
         }
-
         None
     }
 
-    fn find_loose(left: &str, right: &str, limit: usize) -> Option<f64> {
-        let left_search = left
-            .split_whitespace()
-            .rev()
-            .take(limit)
-            .filter(|token| !token.starts_with(&BANNED_CHARACTERS[..]))
-            .find_map(Self::parse_amount);
-
-        if left_search.is_some() {
-            return left_search;
+    fn find_loose_with_range(
+        left: &str,
+        right: &str,
+        limit: usize,
+        s_idx: usize,
+        e_idx: usize,
+    ) -> Option<(f64, usize, usize)> {
+        let left_tokens: Vec<&str> = left.split_whitespace().rev().take(limit).collect();
+        for token in left_tokens {
+            if !token.starts_with(&BANNED_CHARACTERS[..]) {
+                if let Some(val) = Self::parse_amount(token) {
+                    let pos = left.rfind(token).unwrap();
+                    return Some((val, pos, e_idx));
+                }
+            }
         }
 
-        right
-            .split_whitespace()
-            .take(limit)
-            .filter(|token| !token.starts_with(&BANNED_CHARACTERS[..]))
-            .find_map(Self::parse_amount)
+        let right_tokens: Vec<&str> = right.split_whitespace().take(limit).collect();
+        for token in right_tokens {
+            if !token.starts_with(&BANNED_CHARACTERS[..]) {
+                if let Some(val) = Self::parse_amount(token) {
+                    let pos = right.find(token).unwrap();
+                    return Some((val, s_idx, e_idx + pos + token.len()));
+                }
+            }
+        }
+        None
     }
 
     fn parse_amount(s: &str) -> Option<f64> {
@@ -275,11 +297,10 @@ impl CurrencyDetector {
         let mut total = 0.0;
         let mut rest = s_clean.as_str();
 
-        if let Some(c) = rest.chars().next()
-            && !c.is_ascii_digit()
-            && matches!(c, '.' | ',')
-        {
-            return None;
+        if let Some(c) = rest.chars().next() {
+            if !c.is_ascii_digit() && matches!(c, '.' | ',') {
+                return None;
+            }
         }
 
         while !rest.is_empty() {
@@ -354,12 +375,12 @@ impl CurrencyConverter {
         for curr in &currency_list {
             currencies.insert(curr.code.clone(), Arc::new(curr.clone()));
 
-            if curr.source == "tonapi"
-                && let Some(id) = &curr.api_identifier
-            {
-                ton_tokens.push(id.clone());
-                ton_mapping.insert(id.clone(), curr.code.clone());
-                ton_mapping.insert(id.to_lowercase(), curr.code.clone());
+            if curr.source == "tonapi" {
+                if let Some(id) = &curr.api_identifier {
+                    ton_tokens.push(id.clone());
+                    ton_mapping.insert(id.clone(), curr.code.clone());
+                    ton_mapping.insert(id.to_lowercase(), curr.code.clone());
+                }
             }
         }
 
@@ -384,10 +405,10 @@ impl CurrencyConverter {
     async fn get_rates(&self) -> Result<HashMap<String, f64>, ConvertError> {
         {
             let read_guard = self.cache.read().await;
-            if let Some(cached) = &*read_guard
-                && cached.fetched_at.elapsed() < Duration::from_secs(CACHE_DURATION_SECS)
-            {
-                return Ok(cached.rates.clone());
+            if let Some(cached) = &*read_guard {
+                if cached.fetched_at.elapsed() < Duration::from_secs(CACHE_DURATION_SECS) {
+                    return Ok(cached.rates.clone());
+                }
             }
         }
 
@@ -434,14 +455,54 @@ impl CurrencyConverter {
             return Ok(Vec::new());
         }
 
-        let detected = self.detector.detect(text);
+        let mut detected = self.detector.detect(text);
         if detected.is_empty() {
             return Ok(Vec::new());
         }
 
         let rates = self.get_rates().await?;
-        let mut results = Vec::new();
+        let math_chars = ['+', '-', '*', '/', '(', ')', '^'];
 
+        if text.chars().any(|c| math_chars.contains(&c)) {
+            let mut expression = text.to_string();
+            detected.sort_by(|a, b| b.start.cmp(&a.start));
+
+            let base_code = "UAH";
+            let mut possible_math = true;
+
+            for item in &detected {
+                if let Some(rate) = rates.get(&item.currency_code) {
+                    expression
+                        .replace_range(item.start..item.end, &format!("({})", item.amount * rate));
+                } else {
+                    possible_math = false;
+                }
+            }
+
+            if possible_math {
+                if let Ok(ast) = eidolon_lang::parse_eidolon_source(&expression) {
+                    if let Ok(eval_result) = evaluate(&ast, &HashMap::new()) {
+                        if let Ok(final_amount_base) = eval_result.as_number(0) {
+                            if let Some(res) = self.format_math_result(
+                                &text,
+                                final_amount_base,
+                                base_code,
+                                &rates,
+                                &settings.selected_codes,
+                                locale,
+                            ) {
+                                return Ok(vec![res]);
+                            }
+                        }
+                    }
+                } else {
+                    warn!("Failed to parse math expression: {}", expression);
+                }
+            }
+        }
+
+        let mut results = Vec::new();
+        detected.sort_by(|a, b| a.start.cmp(&b.start));
         for item in detected {
             if let Some(res) =
                 self.format_conversion(&item, &rates, &settings.selected_codes, locale)
@@ -453,6 +514,42 @@ impl CurrencyConverter {
         Ok(results)
     }
 
+    fn format_math_result(
+        &self,
+        expression: &str,
+        amount: f64,
+        from_code: &str,
+        rates: &HashMap<String, f64>,
+        targets: &[String],
+        locale: &str,
+    ) -> Option<String> {
+        let from_rate = rates.get(from_code)?;
+        let mut builder = String::new();
+
+        builder.push_str(&format!("{}:\n\n", expression));
+
+        for target_code in targets {
+            if let (Some(target_info), Some(to_rate)) =
+                (self.currencies.get(target_code), rates.get(target_code))
+            {
+                let converted = amount * from_rate / to_rate;
+                let target_word = self.get_plural(converted, target_info, locale);
+                let val_str = Self::format_value(converted);
+
+                builder.push_str(&format!(
+                    "{} {} {}{} {}\n",
+                    target_info.flag, val_str, target_info.symbol, target_code, target_word
+                ));
+            }
+        }
+
+        if builder.is_empty() {
+            None
+        } else {
+            Some(builder)
+        }
+    }
+
     fn format_conversion(
         &self,
         item: &DetectedCurrency,
@@ -461,7 +558,6 @@ impl CurrencyConverter {
         locale: &str,
     ) -> Option<String> {
         let info = self.currencies.get(&item.currency_code)?;
-
         let from_rate = rates.get(&item.currency_code)?;
         let mut builder = String::new();
 
@@ -483,11 +579,11 @@ impl CurrencyConverter {
             {
                 let converted = item.amount * from_rate / to_rate;
                 let target_word = self.get_plural(converted, target_info, locale);
-                let converted = Self::format_value(converted);
+                let converted_str = Self::format_value(converted);
 
                 builder.push_str(&format!(
                     "{} {}{} {}\n",
-                    target_info.flag, converted, target_info.symbol, target_word
+                    target_info.flag, converted_str, target_info.symbol, target_word
                 ));
             }
         }
@@ -535,7 +631,6 @@ impl CurrencyConverter {
         };
 
         let key = format!("currencies.{}.{}", info.code, suffix);
-
         let translated = t!(&key, locale = locale);
 
         if translated == key || translated.is_empty() {
