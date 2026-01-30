@@ -8,7 +8,7 @@ use crate::{
     t,
     util::i18n::get_user_locale,
 };
-use log::{debug, error};
+use log::error;
 use std::sync::Arc;
 use teloxide::{
     prelude::*,

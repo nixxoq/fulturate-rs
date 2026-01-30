@@ -21,7 +21,7 @@ use gem_rs::{
     client::GemSession,
     types::{FileManager, HarmBlockThreshold, Role, Settings},
 };
-use log::{debug, error, info};
+use log::{error, info};
 use redis::AsyncCommands;
 use redis_macros::{FromRedisValue, ToRedisArgs};
 use regex::Regex;
@@ -37,11 +37,13 @@ const QUEUE_LIMIT_FREE: usize = 2; // todo: 15
 const QUEUE_LIMIT_PREMIUM: usize = 50;
 const REDIS_QUEUE_FREE: &str = "sr_queue:free";
 const REDIS_QUEUE_PREMIUM: &str = "sr_queue:premium";
+const REDIS_WORKER_BUSY: &str = "sr_worker_active";
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct SpeechJob {
     pub chat_id: ChatId,
     pub message_id: MessageId,
+    pub status_message_id: MessageId,
     pub user_id: u64,
     pub file_info: AudioStruct,
     pub settings: SpeechRecognitionSettings,
@@ -105,9 +107,24 @@ pub async fn run_speech_worker(bot: Bot, config: Config) {
                 Ok(job) => {
                     let bot_clone = bot.clone();
                     let config_clone = config.clone();
+                    let user_id = job.user_id;
 
-                    if let Err(e) = process_speech_job(bot_clone, config_clone, job).await {
+                    let _: () = con
+                        .set_ex(REDIS_WORKER_BUSY, 1, 300)
+                        .await
+                        .unwrap_or_default();
+
+                    let res = process_speech_job(bot_clone, config_clone, job).await;
+                    if let Err(e) = res {
                         error!("Failed to process speech job: {}", e);
+                    }
+
+                    let _: () = con.del(REDIS_WORKER_BUSY).await.unwrap_or_default();
+
+                    let limit_key = format!("sr_limit:{}", user_id);
+                    let current: i32 = con.get(&limit_key).await.unwrap_or(0);
+                    if current > 0 {
+                        let _: () = con.decr(&limit_key, 1).await.unwrap_or_default();
                     }
                 }
                 Err(e) => error!("Failed to deserialize speech job: {}", e),
@@ -132,17 +149,17 @@ async fn process_speech_job(bot: Bot, config: Config, job: SpeechJob) -> Result<
     )
     .await;
 
-    let processing_msg = bot
-        .send_message(
+    let _ = bot
+        .edit_message_text(
             job.chat_id,
+            job.status_message_id,
             t!("speech.processing_started", locale = &locale),
         )
-        .reply_parameters(ReplyParameters::new(job.message_id))
-        .await?;
+        .await;
 
     let cache = config.get_redis_client();
 
-    let message_file_map_key = format!("message_file_map:{}", processing_msg.id);
+    let message_file_map_key = format!("message_file_map:{}", job.status_message_id);
     cache
         .set(&message_file_map_key, &job.file_info.file_unique_id, 86400)
         .await?;
@@ -155,7 +172,7 @@ async fn process_speech_job(bot: Bot, config: Config, job: SpeechJob) -> Result<
             if text_parts.is_empty() {
                 bot.edit_message_text(
                     job.chat_id,
-                    processing_msg.id,
+                    job.status_message_id,
                     t!("speech.error_empty", locale = &locale),
                 )
                 .await?;
@@ -166,7 +183,7 @@ async fn process_speech_job(bot: Bot, config: Config, job: SpeechJob) -> Result<
 
             bot.edit_message_text(
                 job.chat_id,
-                processing_msg.id,
+                job.status_message_id,
                 format!(
                     "<blockquote expandable>{}</blockquote>",
                     html::escape(&text_parts[0])
@@ -181,7 +198,7 @@ async fn process_speech_job(bot: Bot, config: Config, job: SpeechJob) -> Result<
             let error_text = t!("speech.error_processing", locale = &locale);
             let retry_keyboard = create_retry_keyboard(job.message_id.0, "transcribe", 0, &locale);
 
-            bot.edit_message_text(job.chat_id, processing_msg.id, error_text)
+            bot.edit_message_text(job.chat_id, job.status_message_id, error_text)
                 .reply_markup(retry_keyboard)
                 .await?;
         }
@@ -270,26 +287,28 @@ pub async fn transcription_handler(
             return Ok(());
         }
 
-        let (queue_key, limit) = if is_premium {
-            (REDIS_QUEUE_PREMIUM, QUEUE_LIMIT_PREMIUM)
-        } else {
-            (REDIS_QUEUE_FREE, QUEUE_LIMIT_FREE)
-        };
-
         let mut con = config
             .get_redis_client()
             .client
             .get_multiplexed_tokio_connection()
             .await?;
-        let queue_len: usize = con.llen(queue_key).await?;
 
-        if queue_len >= limit {
+        let limit_key = format!("sr_limit:{}", user.id.0);
+        let current_user_jobs: usize = con.get(&limit_key).await.unwrap_or(0);
+
+        let limit = if is_premium {
+            QUEUE_LIMIT_PREMIUM
+        } else {
+            QUEUE_LIMIT_FREE
+        };
+
+        if current_user_jobs >= limit {
             bot.send_message(
                 msg.chat.id,
                 t!(
                     "speech.queue_full",
                     locale = &locale,
-                    count = queue_len,
+                    count = current_user_jobs,
                     limit = limit
                 ),
             )
@@ -298,28 +317,45 @@ pub async fn transcription_handler(
             return Ok(());
         }
 
+        let premium_len: usize = con.llen(REDIS_QUEUE_PREMIUM).await.unwrap_or(0);
+        let free_len: usize = con.llen(REDIS_QUEUE_FREE).await.unwrap_or(0);
+        let is_busy: usize = con.exists(REDIS_WORKER_BUSY).await.unwrap_or(0);
+
+        let queue_key = if is_premium {
+            REDIS_QUEUE_PREMIUM
+        } else {
+            REDIS_QUEUE_FREE
+        };
+
+        let pos = if is_premium {
+            premium_len + is_busy + 1
+        } else {
+            premium_len + free_len + is_busy + 1
+        };
+
+        let status_msg = bot
+            .send_message(
+                msg.chat.id,
+                t!("speech.added_to_queue", locale = &locale, pos = pos),
+            )
+            .reply_parameters(ReplyParameters::new(msg.id))
+            .parse_mode(ParseMode::Html)
+            .await?;
+
         let job = SpeechJob {
             chat_id: msg.chat.id,
             message_id: msg.id,
+            status_message_id: status_msg.id,
             user_id: user.id.0,
             file_info,
             settings,
         };
 
+        let _: () = con.incr(&limit_key, 1).await?;
+        let _: () = con.expire(&limit_key, 600).await?;
+
         let job_json = serde_json::to_string(&job)?;
         let _: () = con.rpush(queue_key, job_json).await?;
-
-        bot.send_message(
-            msg.chat.id,
-            t!(
-                "speech.added_to_queue",
-                locale = &locale,
-                pos = queue_len + 1
-            ),
-        )
-        .reply_parameters(ReplyParameters::new(msg.id))
-        .parse_mode(ParseMode::Html)
-        .await?;
     } else {
         bot.send_message(msg.chat.id, t!("speech.audio_not_found", locale = &locale))
             .reply_parameters(ReplyParameters::new(msg.id))
