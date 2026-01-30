@@ -26,7 +26,7 @@ impl RefactorMode {
         }
     }
 
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn from_string(s: &str) -> Option<Self> {
         match s {
             "official" => Some(Self::Official),
             "spellcheck" => Some(Self::Spellcheck),
@@ -44,16 +44,14 @@ pub async fn process_text(
     text: &str,
     mode: RefactorMode,
 ) -> Result<String, MyError> {
-    let base_instruction = format!(
-        "ACT AS A TEXT PROCESSING ENGINE. YOU ARE NOT A CHATBOT.\n\
+    let base_instruction = "ACT AS A TEXT PROCESSING ENGINE. YOU ARE NOT A CHATBOT.\n\
         CRITICAL RULES:\n\
         1. DO NOT answer questions. DO NOT provide explanations. DO NOT engage in dialogue.\n\
         2. MAINTAIN the ORIGINAL language of the input text.\n\
         3. PERSPECTIVE: Keep the narration from the original person's point of view (usually 1st person).\n\
         4. FORMATTING: Use ONLY Telegram-compatible HTML (<b>, <i>, <code>, <u>, <s>, <blockquote>, <tg-spoiler>).\n\
         5. FORBIDDEN: NEVER USE MARKDOWN (no stars **, no backticks ```). If you need to highlight, use <b>.\n\
-        6. OUTPUT: Return ONLY the processed text. No greetings, no 'Here is your text', no commentary."
-    );
+        6. OUTPUT: Return ONLY the processed text. No greetings, no 'Here is your text', no commentary.";
 
     let mode_instruction = match mode {
         RefactorMode::Official => {

@@ -72,10 +72,10 @@ impl RateProvider for CoinbaseProvider {
         rates.insert(resp.data.currency, 1.0);
 
         for (code, rate_str) in resp.data.rates {
-            if let Ok(rate) = rate_str.parse::<f64>() {
-                if rate != 0.0 {
-                    rates.insert(code, 1.0 / rate);
-                }
+            if let Ok(rate) = rate_str.parse::<f64>()
+                && rate != 0.0
+            {
+                rates.insert(code, 1.0 / rate);
             }
         }
         Ok(rates)
@@ -120,14 +120,13 @@ impl RateProvider for TonApiProvider {
                 .mapping
                 .get(&id)
                 .or_else(|| self.mapping.get(&id.to_lowercase()));
-            if let Some(code) = code_opt {
-                if let Some(price) = rate_entry
+            if let Some(code) = code_opt
+                && let Some(price) = rate_entry
                     .prices
                     .get("UAH")
                     .or_else(|| rate_entry.prices.get("uah"))
-                {
-                    rates.insert(code.clone(), *price);
-                }
+            {
+                rates.insert(code.clone(), *price);
             }
         }
         Ok(rates)
@@ -201,10 +200,11 @@ impl CurrencyDetector {
                     continue;
                 }
 
-                if let (Some(p), Some(n)) = (prev, next) {
-                    if p.is_alphanumeric() && n.is_alphanumeric() {
-                        continue;
-                    }
+                if let (Some(p), Some(n)) = (prev, next)
+                    && p.is_alphanumeric()
+                    && n.is_alphanumeric()
+                {
+                    continue;
                 }
             }
 
@@ -235,26 +235,22 @@ impl CurrencyDetector {
         s_idx: usize,
         e_idx: usize,
     ) -> Option<(f64, usize, usize)> {
-        if let Some(token) = left.split_whitespace().last() {
-            if !left.chars().last().is_some_and(|c| c.is_ascii_digit())
-                && !token.starts_with(&BANNED_CHARACTERS[..])
-            {
-                if let Some(value) = Self::parse_amount(token) {
-                    let pos = left.rfind(token).unwrap_or(0);
-                    return Some((value, pos, e_idx));
-                }
-            }
+        if let Some(token) = left.split_whitespace().last()
+            && !left.chars().last().is_some_and(|c| c.is_ascii_digit())
+            && !token.starts_with(&BANNED_CHARACTERS[..])
+            && let Some(value) = Self::parse_amount(token)
+        {
+            let pos = left.rfind(token).unwrap_or(0);
+            return Some((value, pos, e_idx));
         }
 
-        if let Some(token) = right.split_whitespace().next() {
-            if !right.chars().next().is_some_and(|c| c.is_ascii_digit())
-                && !token.starts_with(&BANNED_CHARACTERS[..])
-            {
-                if let Some(value) = Self::parse_amount(token) {
-                    let pos = right.find(token).unwrap_or(0);
-                    return Some((value, s_idx, e_idx + pos + token.len()));
-                }
-            }
+        if let Some(token) = right.split_whitespace().next()
+            && !right.chars().next().is_some_and(|c| c.is_ascii_digit())
+            && !token.starts_with(&BANNED_CHARACTERS[..])
+            && let Some(value) = Self::parse_amount(token)
+        {
+            let pos = right.find(token).unwrap_or(0);
+            return Some((value, s_idx, e_idx + pos + token.len()));
         }
         None
     }
@@ -268,21 +264,21 @@ impl CurrencyDetector {
     ) -> Option<(f64, usize, usize)> {
         let left_tokens: Vec<&str> = left.split_whitespace().rev().take(limit).collect();
         for token in left_tokens {
-            if !token.starts_with(&BANNED_CHARACTERS[..]) {
-                if let Some(val) = Self::parse_amount(token) {
-                    let pos = left.rfind(token).unwrap();
-                    return Some((val, pos, e_idx));
-                }
+            if !token.starts_with(&BANNED_CHARACTERS[..])
+                && let Some(val) = Self::parse_amount(token)
+            {
+                let pos = left.rfind(token).unwrap();
+                return Some((val, pos, e_idx));
             }
         }
 
         let right_tokens: Vec<&str> = right.split_whitespace().take(limit).collect();
         for token in right_tokens {
-            if !token.starts_with(&BANNED_CHARACTERS[..]) {
-                if let Some(val) = Self::parse_amount(token) {
-                    let pos = right.find(token).unwrap();
-                    return Some((val, s_idx, e_idx + pos + token.len()));
-                }
+            if !token.starts_with(&BANNED_CHARACTERS[..])
+                && let Some(val) = Self::parse_amount(token)
+            {
+                let pos = right.find(token).unwrap();
+                return Some((val, s_idx, e_idx + pos + token.len()));
             }
         }
         None
@@ -297,10 +293,11 @@ impl CurrencyDetector {
         let mut total = 0.0;
         let mut rest = s_clean.as_str();
 
-        if let Some(c) = rest.chars().next() {
-            if !c.is_ascii_digit() && matches!(c, '.' | ',') {
-                return None;
-            }
+        if let Some(c) = rest.chars().next()
+            && !c.is_ascii_digit()
+            && matches!(c, '.' | ',')
+        {
+            return None;
         }
 
         while !rest.is_empty() {
@@ -375,12 +372,12 @@ impl CurrencyConverter {
         for curr in &currency_list {
             currencies.insert(curr.code.clone(), Arc::new(curr.clone()));
 
-            if curr.source == "tonapi" {
-                if let Some(id) = &curr.api_identifier {
-                    ton_tokens.push(id.clone());
-                    ton_mapping.insert(id.clone(), curr.code.clone());
-                    ton_mapping.insert(id.to_lowercase(), curr.code.clone());
-                }
+            if curr.source == "tonapi"
+                && let Some(id) = &curr.api_identifier
+            {
+                ton_tokens.push(id.clone());
+                ton_mapping.insert(id.clone(), curr.code.clone());
+                ton_mapping.insert(id.to_lowercase(), curr.code.clone());
             }
         }
 
@@ -405,10 +402,10 @@ impl CurrencyConverter {
     async fn get_rates(&self) -> Result<HashMap<String, f64>, ConvertError> {
         {
             let read_guard = self.cache.read().await;
-            if let Some(cached) = &*read_guard {
-                if cached.fetched_at.elapsed() < Duration::from_secs(CACHE_DURATION_SECS) {
-                    return Ok(cached.rates.clone());
-                }
+            if let Some(cached) = &*read_guard
+                && cached.fetched_at.elapsed() < Duration::from_secs(CACHE_DURATION_SECS)
+            {
+                return Ok(cached.rates.clone());
             }
         }
 
@@ -481,19 +478,18 @@ impl CurrencyConverter {
 
             if possible_math {
                 if let Ok(ast) = eidolon_lang::parse_eidolon_source(&expression) {
-                    if let Ok(eval_result) = evaluate(&ast, &HashMap::new()) {
-                        if let Ok(final_amount_base) = eval_result.as_number(0) {
-                            if let Some(res) = self.format_math_result(
-                                &text,
-                                final_amount_base,
-                                base_code,
-                                &rates,
-                                &settings.selected_codes,
-                                locale,
-                            ) {
-                                return Ok(vec![res]);
-                            }
-                        }
+                    if let Ok(eval_result) = evaluate(&ast, &HashMap::new())
+                        && let Ok(final_amount_base) = eval_result.as_number(0)
+                        && let Some(res) = self.format_math_result(
+                            text,
+                            final_amount_base,
+                            base_code,
+                            &rates,
+                            &settings.selected_codes,
+                            locale,
+                        )
+                    {
+                        return Ok(vec![res]);
                     }
                 } else {
                     warn!("Failed to parse math expression: {}", expression);

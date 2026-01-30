@@ -44,17 +44,17 @@ pub async fn check_and_update_locales() -> bool {
         .build()
         .unwrap_or_default();
 
-    let api_url = if REPO_PATH.is_empty() {
+    let api_url = /*if REPO_PATH.is_empty() {
         format!(
             "https://api.github.com/repos/{}/{}/contents",
             REPO_OWNER, REPO_NAME
         )
-    } else {
+    } else {*/
         format!(
             "https://api.github.com/repos/{}/{}/contents/{}",
             REPO_OWNER, REPO_NAME, REPO_PATH
-        )
-    };
+        );
+    // };
 
     let files_list: Vec<GitHubFile> = match client.get(&api_url).send().await {
         Ok(resp) => {

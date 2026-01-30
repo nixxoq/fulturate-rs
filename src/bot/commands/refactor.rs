@@ -103,10 +103,11 @@ pub async fn understand_command_handler(
 
     match process_text(config, &text, RefactorMode::Formulate).await {
         Ok(result) => {
-            if let Err(_) = bot
+            if (bot
                 .edit_message_text(msg.chat.id, processing_msg.id, &result)
                 .parse_mode(ParseMode::Html)
-                .await
+                .await)
+                .is_err()
             {
                 bot.edit_message_text(msg.chat.id, processing_msg.id, result)
                     .await?;

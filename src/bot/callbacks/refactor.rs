@@ -17,7 +17,7 @@ pub async fn handle_refactor_callback(
     src_msg_id: i32,
 ) -> Result<(), MyError> {
     let Some(msg) = q.message else { return Ok(()) };
-    let locale = get_chat_locale(&msg.chat(), config).await;
+    let locale = get_chat_locale(msg.chat(), config).await;
 
     let redis = config.get_redis_client();
     let cache_key = format!("refactor_src:{}", src_msg_id);
@@ -44,7 +44,7 @@ pub async fn handle_refactor_callback(
     )
     .await?;
 
-    let mode = RefactorMode::from_str(mode_str).unwrap_or(RefactorMode::Official);
+    let mode = RefactorMode::from_string(mode_str).unwrap_or(RefactorMode::Official);
 
     match process_text(config, &text, mode).await {
         Ok(result) => {

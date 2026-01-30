@@ -37,7 +37,7 @@ async fn main() {
         }
     });
 
-    let _ = tokio::task::spawn_blocking(|| {
+    tokio::task::spawn_blocking(|| {
         tokio::runtime::Handle::current().block_on(run_metrics_server())
     });
 

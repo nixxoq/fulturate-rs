@@ -350,16 +350,17 @@ pub async fn callback_query_handlers(bot: Bot, q: CallbackQuery) -> Result<(), M
             };
 
             let settings = Settings::get_or_create(&owner).await?;
-            if let Some(MaybeInaccessibleMessage::Regular(msg)) = &q.message {
-                if (msg.chat.is_group() || msg.chat.is_supergroup()) && settings.admin_only_mode {
-                    let member = bot.get_chat_member(msg.chat.id, q.from.id).await?;
-                    if !member.is_privileged() {
-                        bot.answer_callback_query(q.id)
-                            .text(t!("errors.no_permission", locale = &locale))
-                            .show_alert(true)
-                            .await?;
-                        return Ok(());
-                    }
+            if let Some(MaybeInaccessibleMessage::Regular(msg)) = &q.message
+                && (msg.chat.is_group() || msg.chat.is_supergroup())
+                && settings.admin_only_mode
+            {
+                let member = bot.get_chat_member(msg.chat.id, q.from.id).await?;
+                if !member.is_privileged() {
+                    bot.answer_callback_query(q.id)
+                        .text(t!("errors.no_permission", locale = &locale))
+                        .show_alert(true)
+                        .await?;
+                    return Ok(());
                 }
             }
 
@@ -392,16 +393,16 @@ pub async fn callback_query_handlers(bot: Bot, q: CallbackQuery) -> Result<(), M
                 return Ok(());
             }
 
-            if let Some(MaybeInaccessibleMessage::Regular(msg)) = &q.message {
-                if msg.chat.is_group() || msg.chat.is_supergroup() {
-                    let member = bot.get_chat_member(msg.chat.id, q.from.id).await?;
-                    if !member.is_privileged() {
-                        bot.answer_callback_query(q.id)
-                            .text(t!("errors.no_permission", locale = &locale))
-                            .show_alert(true)
-                            .await?;
-                        return Ok(());
-                    }
+            if let Some(MaybeInaccessibleMessage::Regular(msg)) = &q.message
+                && (msg.chat.is_group() || msg.chat.is_supergroup())
+            {
+                let member = bot.get_chat_member(msg.chat.id, q.from.id).await?;
+                if !member.is_privileged() {
+                    bot.answer_callback_query(q.id)
+                        .text(t!("errors.no_permission", locale = &locale))
+                        .show_alert(true)
+                        .await?;
+                    return Ok(());
                 }
             }
 

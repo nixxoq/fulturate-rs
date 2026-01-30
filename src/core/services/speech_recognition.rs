@@ -240,35 +240,34 @@ pub async fn transcription_handler(
         if let Ok(Some(cached)) = cache_client
             .get::<TranscriptionCache>(&file_cache_key)
             .await
+            && !cached.full_text.is_empty()
         {
-            if !cached.full_text.is_empty() {
-                let text_parts = split_text(&cached.full_text, 4000);
+            let text_parts = split_text(&cached.full_text, 4000);
 
-                let sent_msg = bot
-                    .send_message(
-                        msg.chat.id,
-                        format!(
-                            "<blockquote expandable>{}</blockquote>",
-                            html::escape(&text_parts[0])
-                        ),
-                    )
-                    .reply_parameters(ReplyParameters::new(msg.id))
-                    .parse_mode(ParseMode::Html)
-                    .reply_markup(create_transcription_keyboard(
-                        0,
-                        text_parts.len(),
-                        user.id.0,
-                        &locale,
-                    ))
-                    .await?;
+            let sent_msg = bot
+                .send_message(
+                    msg.chat.id,
+                    format!(
+                        "<blockquote expandable>{}</blockquote>",
+                        html::escape(&text_parts[0])
+                    ),
+                )
+                .reply_parameters(ReplyParameters::new(msg.id))
+                .parse_mode(ParseMode::Html)
+                .reply_markup(create_transcription_keyboard(
+                    0,
+                    text_parts.len(),
+                    user.id.0,
+                    &locale,
+                ))
+                .await?;
 
-                let message_file_map_key = format!("message_file_map:{}", sent_msg.id);
-                cache_client
-                    .set(&message_file_map_key, &file_info.file_unique_id, 86400)
-                    .await?;
+            let message_file_map_key = format!("message_file_map:{}", sent_msg.id);
+            cache_client
+                .set(&message_file_map_key, &file_info.file_unique_id, 86400)
+                .await?;
 
-                return Ok(());
-            }
+            return Ok(());
         }
 
         let (queue_key, limit) = if is_premium {
