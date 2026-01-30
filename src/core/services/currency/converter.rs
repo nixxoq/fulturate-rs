@@ -274,7 +274,8 @@ impl CurrencyDetector {
                 if match_str.chars().any(char::is_alphabetic) && match_str.chars().count() == 2 {
                     1
                 } else {
-                    5
+                    // 5
+                    2 // это шоб глубина была типа оффнута, мне просто лень делать эту настройку да
                 };
             if let Some((amount, f_start, f_end)) =
                 Self::find_amount(left, right, limit, start, end)
