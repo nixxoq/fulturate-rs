@@ -647,7 +647,6 @@ async fn get_cached(
         && let Some(cached_text) = cache.get::<TranscriptionCache>(&file_cache_key).await?
         && !cached_text.full_text.is_empty()
     {
-        debug!("File cache HIT for unique_id: {}", &file.file_unique_id);
         return Ok(cached_text);
     }
 
