@@ -44,6 +44,7 @@ services:
       - redis
       - mongo
       - telegram_api
+      - grafana
     networks:
       - fulturate-net
     env_file:
