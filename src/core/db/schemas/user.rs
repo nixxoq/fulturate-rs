@@ -23,6 +23,9 @@ pub struct User {
 
     #[serde(default)]
     pub download_count: i64,
+
+    #[serde(default)]
+    pub is_premium: bool,
 }
 
 impl_skeleton!(User, user_id, "user_id", +currencies);
@@ -85,5 +88,12 @@ impl User {
             doc! { "$inc": { "download_count": 1 } },
         )
         .await
+    }
+
+    pub async fn check_premium(user_id: &str) -> bool {
+        if let Ok(Some(user)) = User::get(user_id.to_string()).await {
+            return user.is_premium;
+        }
+        false
     }
 }

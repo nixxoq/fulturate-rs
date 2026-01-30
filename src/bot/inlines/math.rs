@@ -150,7 +150,7 @@ pub async fn handle_math_inline(
             Ok(ast) => match evaluate(&ast, &HashMap::new()) {
                 Ok(calc_result) => InlineQueryResultArticle::new(
                     "calc_result",
-                    format!("Результат: {}", calc_result),
+                    format!("{}: {}", expression, calc_result),
                     InputMessageContent::Text(InputMessageContentText::new(format!(
                         "{} = {}",
                         expression, calc_result

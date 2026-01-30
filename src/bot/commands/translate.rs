@@ -1,7 +1,11 @@
 use crate::{
-    bot::keyboards::{delete::delete_message_button, translate::create_language_keyboard},
+    bot::{
+        keyboards::{delete::delete_message_button, translate::create_language_keyboard},
+        modules::{Owner, translate::TranslateSettings},
+    },
     core::{
         config::Config,
+        db::schemas::settings::Settings,
         services::translation::{SUPPORTED_LANGUAGES, normalize_language_code},
     },
     errors::MyError,
@@ -18,7 +22,6 @@ use teloxide::{
     types::{InlineKeyboardButton, Message, ParseMode, ReplyParameters},
     utils::html::escape,
 };
-use translators::{GoogleTranslator, Translator};
 use uuid::Uuid;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -41,28 +44,46 @@ pub fn split_text_tr(text: &str, chunk_size: usize) -> Vec<String> {
     }
 
     let mut chunks = Vec::new();
-    let mut current_chunk = String::with_capacity(chunk_size);
+    let mut start_idx = 0;
 
-    for paragraph in text.split("\n\n") {
-        if current_chunk.len() + paragraph.len() + 2 > chunk_size && !current_chunk.is_empty() {
-            chunks.push(current_chunk.trim().to_string());
-            current_chunk.clear();
+    while start_idx < text.len() {
+        let remaining_len = text.len() - start_idx;
+
+        if remaining_len <= chunk_size {
+            chunks.push(text[start_idx..].trim().to_string());
+            break;
         }
-        if paragraph.len() > chunk_size {
-            for part in paragraph.chars().collect::<Vec<_>>().chunks(chunk_size) {
-                chunks.push(part.iter().collect());
-            }
+
+        let mut split_idx = start_idx + chunk_size;
+        while !text.is_char_boundary(split_idx) {
+            split_idx -= 1;
+        }
+
+        let slice = &text[start_idx..split_idx];
+
+        let best_split = slice
+            .rfind("\n\n")
+            .map(|i| i + 2)
+            .or_else(|| {
+                slice
+                    .rfind(". ")
+                    .map(|i| i + 1)
+                    .or_else(|| slice.rfind("! ").map(|i| i + 1))
+                    .or_else(|| slice.rfind("? ").map(|i| i + 1))
+            })
+            .or_else(|| slice.rfind('\n').map(|i| i + 1))
+            .or_else(|| slice.rfind(' ').map(|i| i + 1));
+
+        if let Some(offset) = best_split {
+            let actual_split = start_idx + offset;
+            chunks.push(text[start_idx..actual_split].trim().to_string());
+            start_idx = actual_split;
         } else {
-            current_chunk.push_str(paragraph);
-            current_chunk.push_str("\n\n");
+            chunks.push(text[start_idx..split_idx].trim().to_string());
+            start_idx = split_idx;
         }
     }
-
-    if !current_chunk.is_empty() {
-        chunks.push(current_chunk.trim().to_string());
-    }
-
-    chunks
+    chunks.into_iter().filter(|s| !s.is_empty()).collect()
 }
 
 pub async fn translate_handler(
@@ -87,7 +108,7 @@ pub async fn translate_handler(
         }
     };
 
-    let text_to_translate = match replied_to_message.text() {
+    let text_to_translate = match replied_to_message.text().or(replied_to_message.caption()) {
         Some(text) => text,
         None => {
             bot.send_message(msg.chat.id, t!("errors.reply_to_text", locale = &locale))
@@ -108,6 +129,22 @@ pub async fn translate_handler(
         bot.send_message(msg.chat.id, t!("errors.reply_to_user", locale = &locale))
             .reply_parameters(ReplyParameters::new(msg.id))
             .parse_mode(ParseMode::Html)
+            .await?;
+        return Ok(());
+    }
+
+    let owner = Owner {
+        id: msg.chat.id.to_string(),
+        r#type: if msg.chat.is_private() {
+            "user".to_string()
+        } else {
+            "group".to_string()
+        },
+    };
+    let settings: TranslateSettings = Settings::get_module_settings(&owner, "translate").await?;
+
+    if !settings.enabled {
+        bot.send_message(msg.chat.id, t!("errors.module_disabled", locale = &locale))
             .await?;
         return Ok(());
     }
@@ -144,15 +181,32 @@ pub async fn translate_handler(
         }
     }
 
-    let text_chunks = split_text_tr(text_to_translate, 2800);
+    let text_chunks = split_text_tr(text_to_translate, 700);
 
-    let google_trans = GoogleTranslator::default();
-    let translation_futures = text_chunks
-        .iter()
-        .map(|chunk| google_trans.translate_async(chunk, "", &target_lang));
+    let translation_futures = text_chunks.iter().map(|chunk| {
+        let target = target_lang.clone();
+        async move {
+            config
+                .get_mozhi_client()
+                .request(chunk, target)
+                .engine(settings.default_engine)
+                .source("auto")
+                .send()
+                .await
+        }
+    });
 
     let results = join_all(translation_futures).await;
-    let translated_chunks: Vec<String> = results.into_iter().filter_map(Result::ok).collect();
+    let translated_chunks: Vec<String> = results
+        .into_iter()
+        .filter_map(|res| match res {
+            Ok(val) => Some(val),
+            Err(e) => {
+                log::error!("❌ Translation chunk failed: {:?}", e);
+                None
+            }
+        })
+        .collect();
     let full_translated_text = translated_chunks.join("\n\n");
 
     if full_translated_text.is_empty() {

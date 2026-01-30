@@ -1,4 +1,8 @@
-use crate::{bot::modules::cobalt::CobaltSettings, errors::MyError};
+use crate::{
+    bot::modules::cobalt::CobaltSettings,
+    core::metrics::{API_LATENCY, MODULE_USAGE},
+    errors::MyError,
+};
 use ccobalt::model::{
     request::{DownloadRequest, FilenameStyle},
     response::DownloadResponse,
@@ -91,6 +95,8 @@ pub async fn resolve_download_url(
     settings: &CobaltSettings,
     client: &ccobalt::Client,
 ) -> Result<Option<DownloadResult>, MyError> {
+    MODULE_USAGE.with_label_values(&["cobalt", "resolve"]).inc();
+
     let cobalt_req = DownloadRequest {
         url: url.to_string(),
         filename_style: Some(FilenameStyle::Pretty),
@@ -107,7 +113,9 @@ pub async fn resolve_download_url(
         }),
         ..Default::default()
     };
+    let timer = API_LATENCY.with_label_values(&["cobalt"]).start_timer();
     let response = client.resolve_download(&cobalt_req).await?;
+    timer.observe_duration();
     match response {
         DownloadResponse::Error { error } => {
             log::error!("Cobalt API error: {:?}", error);

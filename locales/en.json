@@ -62,13 +62,16 @@
   "chat": {
     "bot_added_private": "<b>Welcome to Fulturate!</b> 👋\n\nI am ready to help with various tasks!\n\nHere is a short list of my features:\n- 📥 <b>Media Downloader</b>: from various sources.\n- 💱 <b>Currency Converter</b>: up-to-date rates at your fingertips.\n- 🤫 <b>Whisper System</b>: for more private communication.\n\nUse the /settings command to configure modules and learn more.",
     "bot_added_group": "<b>Thanks for adding Fulturate to your chat!</b> 🎉\n\nI am a multifunctional bot ready to assist!\n\nFor full functionality, I need <b>admin rights</b>. This allows me to process commands and interact efficiently.\n\nOne of the admins can use the /settings command to configure my modules.",
-    "kicked": "Bot was kicked/banned. Data deleted for ID: %{id}"
+    "kicked": "Bot was kicked/banned. Data deleted for ID: %{id}",
+    "must_subscribe": "To continue, you need to subscribe to our channel",
+    "subscribe_needed_btn": "📢 Subscribe to Channel"
   },
   "settings": {
     "main_header": "⚙️ <b>Settings</b>\n\nPlease select a category to configure:",
     "btn_modules": "🧩 Modules",
     "btn_language": "🏳️ Language",
     "btn_delete_data": "🗑️ Delete Data",
+    "btn_admin_only": "🔐 Admins Only: %{status}",
     "modules_header": "⚙️ <b>Module Settings</b>\n\nClick a button to enable or disable the corresponding module.\n✅ – module enabled\n❌ – module disabled\n\n",
     "lang_header": "🏳️ <b>Language Settings</b>\n\nSelect the interface language:",
     "lang_selected_alert": "✅ Language changed to English.",
@@ -98,6 +101,8 @@
       "attr_off": "Attribution: Off ❌",
       "error_duration_title": "Video too long",
       "error_too_long": "❌ Video is longer than %{minutes} minutes and cannot be processed.",
+      "error_restricted_title": "Content Unavailable",
+      "error_restricted": "❌ This video is unavailable, age-restricted, or private.",
       "error_processing_title": "Processing Error",
       "error_processing": "❌ An error occurred while processing the video.",
       "processing": "⏳ Processing video...",
@@ -151,6 +156,14 @@
       "send_btn": "Click to send whisper",
       "send_desc": "Message: %{msg}"
     },
+    "refactor": {
+      "btn_official": "Formal",
+      "btn_spellcheck": "Spellcheck",
+      "btn_beauty": "Beautify",
+      "btn_formulate": "Rephrase",
+      "btn_group_fix": "Fix Errors",
+      "btn_understand": "Explain Meaning"
+    },
     "speech": {
       "name": "Speech Recognition",
       "desc": "Transcribe and summarize voice messages.",
@@ -190,7 +203,10 @@
     "audio_not_found": "❌ Source audio not found.",
     "error_retry": "❌ Error during retry.",
     "error_processing": "❌ Error processing audio.",
-    "error_transcription": "❌ Failed to transcribe text from message."
+    "error_transcription": "❌ Failed to transcribe text from message.",
+    "queue_full": "❌ The processing queue is full (%{count}/%{limit}). Please try again later.",
+    "added_to_queue": "⏳ Added to queue. Position: %{pos}.",
+    "processing_started": "🔄 Starting processing..."
   },
   "translate": {
     "cache_expired": "Translation cache expired. Please translate again.",

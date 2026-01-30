@@ -1,5 +1,6 @@
 mod json;
 
+use crate::core::services::translation::MozhiClient;
 use crate::core::{
     config::json::{JsonConfig, read_json_config},
     db::redis::RedisCache,
@@ -29,6 +30,8 @@ pub struct Config {
     telegram_api: String,
     gemini_base_url: String,
     trash_channel_id: String,
+    channel_username: String,
+    mozhi_client: MozhiClient,
 }
 
 impl Config {
@@ -131,6 +134,17 @@ impl Config {
             std::process::exit(1);
         };
 
+        let Ok(channel_username) = std::env::var("CHANNEL_USERNAME") else {
+            error!("CHANNEL_USERNAME expected");
+            std::process::exit(1);
+        };
+
+        let Ok(mozhi_api_url) = std::env::var("MOZHI_API_URL") else {
+            error!("MOZHI_API_URL expected");
+            std::process::exit(1);
+        };
+        let mozhi_client = MozhiClient::new(mozhi_api_url);
+
         Config {
             bot,
             cobalt_client,
@@ -146,6 +160,8 @@ impl Config {
             telegram_api: telegram_api_url,
             gemini_base_url,
             trash_channel_id,
+            channel_username,
+            mozhi_client,
         }
     }
 
@@ -204,5 +220,13 @@ impl Config {
 
     pub fn get_gemini_base_url(&self) -> &str {
         &self.gemini_base_url
+    }
+
+    pub fn get_channel_username(&self) -> &str {
+        &self.channel_username
+    }
+
+    pub fn get_mozhi_client(&self) -> &MozhiClient {
+        &self.mozhi_client
     }
 }

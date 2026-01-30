@@ -1,9 +1,6 @@
 use crate::{
-    bot::keyboards::admin::{admin_keyboard, confirm_broadcast_keyboard},
-    core::{
-        config::Config,
-        db::schemas::{OrmFunction, user::User},
-    },
+    bot::keyboards::admin::{admin_keyboard, broadcast_mode_keyboard},
+    core::config::Config,
     errors::MyError,
 };
 use teloxide::{
@@ -57,11 +54,8 @@ pub async fn broadcast_command_handler(
         return Ok(());
     };
 
-    let users_count = User::query().count().await.unwrap_or(0);
-
     let admin_id = msg.from.as_ref().unwrap().id.0;
-    let redis_key = format!("broadcast_pending:{}", admin_id);
-
+    let redis_key = format!("broadcast_setup:{}", admin_id);
     let save_data = format!("{}:{}", reply_msg.chat.id, reply_msg.id);
 
     config
@@ -69,20 +63,14 @@ pub async fn broadcast_command_handler(
         .set(&redis_key, &save_data, 300)
         .await?;
 
-    let text = format!(
-        "📢 <b>Подготовка рассылки</b>\n\n\
-        Вы собираетесь отправить это сообщение <b>{}</b> пользователям.\n\n\
-        ⚠️ <i>Это действие нельзя будет отменить после начала.</i>\n\
-        Подтвердите отправку:",
-        users_count
-    );
+    let text = "📢 <b>Настройка рассылки</b>\n\nВыберите режим отправки:";
 
     bot.copy_message(msg.chat.id, reply_msg.chat.id, reply_msg.id)
         .await?;
 
     bot.send_message(msg.chat.id, text)
         .parse_mode(ParseMode::Html)
-        .reply_markup(confirm_broadcast_keyboard(users_count))
+        .reply_markup(broadcast_mode_keyboard())
         .await?;
 
     Ok(())

@@ -27,7 +27,7 @@ pub struct CobaltSettings {
 impl Default for CobaltSettings {
     fn default() -> Self {
         Self {
-            enabled: false,
+            enabled: true,
             video_quality: VideoQuality::Q720,
             audio_quality: AudioQuality::K256,
             attribution: false,

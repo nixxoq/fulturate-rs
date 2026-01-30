@@ -17,29 +17,31 @@ use crate::{
     core::{
         config::Config,
         db::schemas::{settings::Settings, user::User as DBUser},
+        metrics::{ERRORS_COUNTER, INCOMING_UPDATES},
     },
     errors::MyError,
     t,
-    util::{enums::Command, i18n::get_locale_by_id},
+    util::{enums::Command, i18n::get_locale_by_id, is_user_subscribed},
 };
-use log::{debug, error, info};
+use log::{error, info};
 use mongodb::bson::doc;
 use oximod::{Model, OxiClient};
 use serde::Deserialize;
 use std::{convert::Infallible, fmt::Write, ops::ControlFlow, sync::Arc};
 use teloxide::{
     Bot,
-    dispatching::{
-        Dispatcher, DpHandlerDescription, HandlerExt, MessageFilterExt, UpdateFilterExt,
-    },
+    dispatching::{Dispatcher, DpHandlerDescription, MessageFilterExt, UpdateFilterExt},
     dptree,
     error_handlers::LoggingErrorHandler,
-    payloads::{AnswerInlineQuerySetters, SendDocumentSetters, DeleteWebhookSetters},
+    payloads::{
+        AnswerInlineQuerySetters, DeleteWebhookSetters, SendDocumentSetters, SendMessageSetters,
+    },
     prelude::{ChatId, Handler, Message, Requester},
     types::{
         InlineKeyboardButton, InlineKeyboardMarkup, InlineQuery, InlineQueryResult,
-        InlineQueryResultArticle, InputFile, InputMessageContent, InputMessageContentText, Me,
-        MessageId, ParseMode, ThreadId, Update,
+        InlineQueryResultArticle, InlineQueryResultsButton, InlineQueryResultsButtonKind,
+        InputFile, InputMessageContent, InputMessageContentText, Me, MessageId, ParseMode,
+        Recipient, ThreadId, Update,
     },
     update_listeners::Polling,
     utils::{command::BotCommands, html},
@@ -52,6 +54,8 @@ async fn root_handler(
     logic: Arc<Handler<'static, Result<(), MyError>, DpHandlerDescription>>,
     me: Me,
 ) -> Result<(), Infallible> {
+    INCOMING_UPDATES.inc();
+
     let deps = dptree::deps![update.clone(), config.clone(), bot.clone(), me.clone()];
     let result = logic.dispatch(deps).await;
 
@@ -61,6 +65,25 @@ async fn root_handler(
         let error_deps = dptree::deps![Arc::new(err), update, config, bot];
         let _ = error_handler_endpoint.dispatch(error_deps).await;
     }
+
+    Ok(())
+}
+
+async fn subscription_guard(bot: Bot, msg: Message, config: Arc<Config>) -> Result<(), MyError> {
+    let locale = get_locale_by_id(msg.from.unwrap().id.0, &config).await;
+    let channel_url = format!(
+        "https://t.me/{}",
+        config.get_channel_username().replace("@", "")
+    );
+
+    let keyboard = InlineKeyboardMarkup::new(vec![vec![InlineKeyboardButton::url(
+        t!("chat.subscribe_needed_btn", locale = &locale),
+        channel_url.parse()?,
+    )]]);
+
+    bot.send_message(msg.chat.id, t!("chat.must_subscribe", locale = &locale))
+        .reply_markup(keyboard)
+        .await?;
 
     Ok(())
 }
@@ -78,9 +101,6 @@ async fn prompt_registration(
     me: Me,
     config: Arc<Config>,
 ) -> Result<(), MyError> {
-    let user_id_str = q.from.id.to_string();
-    debug!("User {} not found. Offering to register.", user_id_str);
-
     let locale = get_locale_by_id(q.from.id.0, &config).await;
 
     let start_url = format!("https://t.me/{}?start=inl", me.username());
@@ -160,8 +180,37 @@ async fn send_modules_disabled_message(
     Ok(())
 }
 
+async fn prompt_subscription_inline(
+    bot: Bot,
+    q: InlineQuery,
+    config: Arc<Config>,
+) -> Result<(), MyError> {
+    let locale = get_locale_by_id(q.from.id.0, &config).await;
+
+    bot.answer_inline_query(q.id, vec![])
+        .button(InlineQueryResultsButton {
+            text: t!("chat.subscribe_needed_btn", locale = &locale),
+            kind: InlineQueryResultsButtonKind::StartParameter("register".to_string()),
+        })
+        .cache_time(0)
+        .await?;
+
+    Ok(())
+}
+
 pub fn inline_query_handler() -> Handler<'static, Result<(), MyError>, DpHandlerDescription> {
     dptree::entry()
+        .branch(
+            dptree::filter_async(|bot: Bot, q: InlineQuery, config: Arc<Config>| async move {
+                !is_user_subscribed(
+                    &bot,
+                    q.from.id,
+                    Recipient::ChannelUsername(config.get_channel_username().to_string()),
+                )
+                .await
+            })
+            .endpoint(prompt_subscription_inline),
+        )
         .branch(
             dptree::filter_async(|q: InlineQuery| async move { !is_user_registered(q).await })
                 .endpoint(prompt_registration),
@@ -190,17 +239,43 @@ async fn run_bot(config: Arc<Config>) -> Result<(), MyError> {
     bot.delete_webhook().drop_pending_updates(true).await?;
     bot.set_my_commands(command_menu.clone()).await?;
 
+    let sub_check =
+        dptree::filter_async(|bot: Bot, msg: Message, config: Arc<Config>| async move {
+            if let Some(user) = msg.from {
+                return is_user_subscribed(
+                    &bot,
+                    user.id,
+                    Recipient::ChannelUsername(config.get_channel_username().to_string()),
+                )
+                .await;
+            }
+            false
+        });
+
     let logic_handlers = dptree::entry()
         .branch(
             Update::filter_message()
-                .filter_command::<Command>()
-                .endpoint(command_handlers),
-        )
-        .branch(
-            Update::filter_message()
-                .branch(Message::filter_text().endpoint(handle_currency))
-                .branch(Message::filter_video_note().endpoint(handle_speech))
-                .branch(Message::filter_voice().endpoint(handle_speech)),
+                .branch(
+                    dptree::filter(|msg: Message| msg.chat.is_private())
+                        .branch(
+                            sub_check
+                                .branch(
+                                    teloxide::filter_command::<Command, _>()
+                                        .endpoint(command_handlers),
+                                )
+                                .branch(Message::filter_text().endpoint(handle_currency))
+                                .branch(Message::filter_video_note().endpoint(handle_speech))
+                                .branch(Message::filter_voice().endpoint(handle_speech)),
+                        )
+                        .endpoint(subscription_guard),
+                )
+                .branch(
+                    dptree::filter(|msg: Message| !msg.chat.is_private())
+                        .branch(teloxide::filter_command::<Command, _>().endpoint(command_handlers))
+                        .branch(Message::filter_text().endpoint(handle_currency))
+                        .branch(Message::filter_video_note().endpoint(handle_speech))
+                        .branch(Message::filter_voice().endpoint(handle_speech)),
+                ),
         )
         .branch(Update::filter_callback_query().endpoint(callback_query_handlers))
         .branch(Update::filter_my_chat_member().endpoint(handle_bot_added))
@@ -239,6 +314,8 @@ pub async fn handle_error(err: Arc<MyError>, update: Update, config: Arc<Config>
     if format!("{:?}", err).contains("query is too old") {
         return;
     }
+
+    ERRORS_COUNTER.with_label_values(&["generic_error"]).inc();
 
     error!("Error: {:#}", err);
 

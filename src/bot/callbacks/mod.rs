@@ -1,4 +1,5 @@
 use crate::bot::commands::help::handle_help_pagination_callback;
+use crate::core::db::schemas::settings::Settings;
 use crate::util::i18n::get_locale_by_owner;
 use crate::{
     bot::{
@@ -26,7 +27,7 @@ use crate::{
     t,
     util::i18n::{get_user_locale, set_locale},
 };
-use log::{error, info};
+use log::error;
 use std::sync::Arc;
 use teloxide::{
     Bot,
@@ -38,11 +39,17 @@ use teloxide::{
 pub mod admin;
 pub mod cobalt_pagination;
 pub mod delete;
+pub mod refactor;
 pub mod translate;
 pub mod whisper;
 
 enum CallbackAction<'a> {
     SettingsMain {
+        owner_type: &'a str,
+        owner_id: &'a str,
+        commander_id: u64,
+    },
+    ToggleAdminOnly {
         owner_type: &'a str,
         owner_id: &'a str,
         commander_id: u64,
@@ -103,6 +110,10 @@ enum CallbackAction<'a> {
     },
     Admin,
     NoOp,
+    Refactor {
+        mode: &'a str,
+        src_msg_id: i32,
+    },
 }
 
 fn parse_callback_data(data: &'_ str) -> Option<CallbackAction<'_>> {
@@ -116,6 +127,19 @@ fn parse_callback_data(data: &'_ str) -> Option<CallbackAction<'_>> {
             && let Ok(commander_id) = parts[2].parse()
         {
             return Some(CallbackAction::SettingsMain {
+                owner_type: parts[0],
+                owner_id: parts[1],
+                commander_id,
+            });
+        }
+    }
+
+    if let Some(rest) = data.strip_prefix("settings_toggle_admin:") {
+        let parts: Vec<_> = rest.split(':').collect();
+        if parts.len() == 3
+            && let Ok(commander_id) = parts[2].parse()
+        {
+            return Some(CallbackAction::ToggleAdminOnly {
                 owner_type: parts[0],
                 owner_id: parts[1],
                 commander_id,
@@ -280,6 +304,18 @@ fn parse_callback_data(data: &'_ str) -> Option<CallbackAction<'_>> {
         return Some(CallbackAction::Admin);
     }
 
+    if let Some(rest) = data.strip_prefix("refactor:") {
+        let parts: Vec<_> = rest.split(':').collect();
+        if parts.len() == 2
+            && let Ok(id) = parts[1].parse()
+        {
+            return Some(CallbackAction::Refactor {
+                mode: parts[0],
+                src_msg_id: id,
+            });
+        }
+    }
+
     None
 }
 
@@ -308,11 +344,82 @@ pub async fn callback_query_handlers(bot: Bot, q: CallbackQuery) -> Result<(), M
 
             locale = get_locale_by_owner(owner_id, owner_type, &config).await;
 
+            let owner = Owner {
+                id: owner_id.to_string(),
+                r#type: owner_type.to_string(),
+            };
+
+            let settings = Settings::get_or_create(&owner).await?;
+            if let Some(MaybeInaccessibleMessage::Regular(msg)) = &q.message
+                && (msg.chat.is_group() || msg.chat.is_supergroup())
+                && settings.admin_only_mode
+            {
+                let member = bot.get_chat_member(msg.chat.id, q.from.id).await?;
+                if !member.is_privileged() {
+                    bot.answer_callback_query(q.id)
+                        .text(t!("errors.no_permission", locale = &locale))
+                        .show_alert(true)
+                        .await?;
+                    return Ok(());
+                }
+            }
+
             let Some(MaybeInaccessibleMessage::Regular(msg)) = q.message else {
                 return Ok(());
             };
 
-            let (text, kb) = get_main_settings_menu(&locale, owner_type, owner_id, commander_id);
+            let (text, kb) = get_main_settings_menu(
+                &locale,
+                owner_type,
+                owner_id,
+                commander_id,
+                settings.admin_only_mode,
+            );
+            bot.edit_message_text(msg.chat.id, msg.id, text)
+                .reply_markup(kb)
+                .parse_mode(teloxide::types::ParseMode::Html)
+                .await?;
+        }
+        Some(CallbackAction::ToggleAdminOnly {
+            owner_type,
+            owner_id,
+            commander_id,
+        }) => {
+            if q.from.id.0 != commander_id {
+                bot.answer_callback_query(q.id)
+                    .text(t!("errors.no_permission", locale = &locale))
+                    .show_alert(true)
+                    .await?;
+                return Ok(());
+            }
+
+            if let Some(MaybeInaccessibleMessage::Regular(msg)) = &q.message
+                && (msg.chat.is_group() || msg.chat.is_supergroup())
+            {
+                let member = bot.get_chat_member(msg.chat.id, q.from.id).await?;
+                if !member.is_privileged() {
+                    bot.answer_callback_query(q.id)
+                        .text(t!("errors.no_permission", locale = &locale))
+                        .show_alert(true)
+                        .await?;
+                    return Ok(());
+                }
+            }
+
+            let owner = Owner {
+                id: owner_id.to_string(),
+                r#type: owner_type.to_string(),
+            };
+
+            let new_state = Settings::toggle_admin_mode(&owner).await?;
+            locale = get_locale_by_owner(owner_id, owner_type, &config).await;
+
+            let Some(MaybeInaccessibleMessage::Regular(msg)) = q.message else {
+                return Ok(());
+            };
+
+            let (text, kb) =
+                get_main_settings_menu(&locale, owner_type, owner_id, commander_id, new_state);
             bot.edit_message_text(msg.chat.id, msg.id, text)
                 .reply_markup(kb)
                 .parse_mode(teloxide::types::ParseMode::Html)
@@ -368,7 +475,19 @@ pub async fn callback_query_handlers(bot: Bot, q: CallbackQuery) -> Result<(), M
                 return Ok(());
             };
 
-            let (text, kb) = get_main_settings_menu(&locale, owner_type, owner_id, commander_id);
+            let owner = Owner {
+                id: owner_id.to_string(),
+                r#type: owner_type.to_string(),
+            };
+            let settings = Settings::get_or_create(&owner).await?;
+
+            let (text, kb) = get_main_settings_menu(
+                &locale,
+                owner_type,
+                owner_id,
+                commander_id,
+                settings.admin_only_mode,
+            );
             bot.edit_message_text(msg.chat.id, msg.id, text)
                 .reply_markup(kb)
                 .parse_mode(teloxide::types::ParseMode::Html)
@@ -406,11 +525,6 @@ pub async fn callback_query_handlers(bot: Bot, q: CallbackQuery) -> Result<(), M
             module_key,
             commander_id,
         }) => {
-            info!(
-                "module_select: id: {} | commander_id: {}",
-                q.from.clone().id.0,
-                commander_id
-            );
             if q.from.id.0 != commander_id {
                 bot.answer_callback_query(q.id)
                     .text(t!("errors.no_permission", locale = &locale))
@@ -440,11 +554,6 @@ pub async fn callback_query_handlers(bot: Bot, q: CallbackQuery) -> Result<(), M
             owner_id,
             commander_id,
         }) => {
-            info!(
-                "settings_back: id: {} | commander_id: {}",
-                q.from.clone().id.0,
-                commander_id
-            );
             if q.from.id.0 != commander_id {
                 bot.answer_callback_query(q.id)
                     .text(t!("errors.no_permission", locale = &locale))
@@ -471,11 +580,6 @@ pub async fn callback_query_handlers(bot: Bot, q: CallbackQuery) -> Result<(), M
             rest,
             commander_id,
         }) => {
-            info!(
-                "module_settings: id: {} | commander_id: {}",
-                q.from.clone().id.0,
-                commander_id
-            );
             if q.from.id.0 != commander_id && commander_id != 0 {
                 bot.answer_callback_query(q.id)
                     .text(t!("errors.no_permission", locale = &locale))
@@ -575,6 +679,9 @@ pub async fn callback_query_handlers(bot: Bot, q: CallbackQuery) -> Result<(), M
         }
         Some(CallbackAction::NoOp) => {
             bot.answer_callback_query(q.id).await?;
+        }
+        Some(CallbackAction::Refactor { mode, src_msg_id }) => {
+            refactor::handle_refactor_callback(bot, q, &config, mode, src_msg_id).await?
         }
         None => {
             log::warn!("Unhandled callback query data: {}", data);

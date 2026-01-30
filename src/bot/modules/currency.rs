@@ -85,6 +85,8 @@ module! {
             let mut changed = false;
             let mut page = 0;
 
+            println!("{}", parts[0]);
+
             match parts[0] {
                 "toggle_module" => {
                     s.enabled = !s.enabled;
@@ -170,7 +172,7 @@ impl CurrencyModule {
         };
         let toggle_btn = InlineKeyboardButton::callback(
             t!(toggle_key, locale = &locale),
-            format!("{}:toggle_module", self.key()),
+            format!("{}:settings:toggle_module:{}", self.key(), commander_id),
         );
 
         let back_btn = InlineKeyboardButton::callback(
@@ -196,7 +198,12 @@ impl CurrencyModule {
                 let is_selected = settings.selected_codes.contains(&currency.code);
                 let icon = if is_selected { "✅" } else { "❌" };
                 let label = format!("{} {}", icon, currency.code);
-                let cb_data = format!("{}:settings:toggle:{}", self.key(), currency.code);
+                let cb_data = format!(
+                    "{}:settings:toggle:{}:{}",
+                    self.key(),
+                    currency.code,
+                    commander_id
+                );
                 InlineKeyboardButton::callback(label, cb_data)
             });
 

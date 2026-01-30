@@ -7,7 +7,7 @@ use crate::{
     util::i18n::get_chat_locale,
 };
 use teloxide::prelude::*;
-use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup};
+use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, ReplyParameters};
 
 pub async fn settings_command_handler(
     bot: Bot,
@@ -25,9 +25,34 @@ pub async fn settings_command_handler(
     }
     .to_string();
 
+    let owner = Owner {
+        id: owner_id.clone(),
+        r#type: owner_type.clone(),
+    };
+
     let locale = get_chat_locale(&message.chat, config).await;
 
-    let (text, keyboard) = get_main_settings_menu(&locale, &owner_type, &owner_id, commander_id);
+    let settings = Settings::get_or_create(&owner).await?;
+    if (message.chat.is_group() || message.chat.is_supergroup()) && settings.admin_only_mode {
+        let member = bot.get_chat_member(message.chat.id, commander.id).await?;
+        if !member.is_privileged() {
+            bot.send_message(
+                message.chat.id,
+                t!("errors.no_permission", locale = &locale),
+            )
+            .reply_parameters(ReplyParameters::new(message.id))
+            .await?;
+            return Ok(());
+        }
+    }
+
+    let (text, keyboard) = get_main_settings_menu(
+        &locale,
+        &owner_type,
+        &owner_id,
+        commander_id,
+        settings.admin_only_mode,
+    );
 
     bot.send_message(message.chat.id, text)
         .parse_mode(teloxide::types::ParseMode::Html)
@@ -42,10 +67,11 @@ pub fn get_main_settings_menu(
     owner_type: &str,
     owner_id: &str,
     commander_id: u64,
+    admin_only: bool,
 ) -> (String, InlineKeyboardMarkup) {
     let text = t!("settings.main_header", locale = locale);
 
-    let buttons = vec![
+    let mut buttons = vec![
         vec![InlineKeyboardButton::callback(
             t!("settings.btn_language", locale = locale),
             format!("settings_lang:{}:{}:{}", owner_type, owner_id, commander_id),
@@ -62,6 +88,21 @@ pub fn get_main_settings_menu(
             format!("delete_data:{}", commander_id),
         )],
     ];
+
+    if owner_type == "group" {
+        let icon = if admin_only { "✅" } else { "❌" };
+        let label = t!("settings.btn_admin_only", locale = locale, status = icon);
+        buttons.insert(
+            2,
+            vec![InlineKeyboardButton::callback(
+                label,
+                format!(
+                    "settings_toggle_admin:{}:{}:{}",
+                    owner_type, owner_id, commander_id
+                ),
+            )],
+        );
+    }
 
     (text.parse().unwrap(), InlineKeyboardMarkup::new(buttons))
 }

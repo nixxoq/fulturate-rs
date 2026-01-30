@@ -1,5 +1,5 @@
 use crate::{
-    bot::keyboards::admin::admin_keyboard,
+    bot::keyboards::admin::{admin_keyboard, confirm_broadcast_keyboard},
     core::{
         config::Config,
         db::schemas::{OrmFunction, user::User},
@@ -7,11 +7,12 @@ use crate::{
     errors::MyError,
 };
 use chrono::Local;
+use std::fmt::Write;
 use std::time::{Duration, SystemTime};
 use sysinfo::{Pid, System};
 use teloxide::{
     prelude::*,
-    types::{MessageId, ParseMode},
+    types::{InputFile, MessageId, ParseMode},
 };
 use tokio::time::sleep;
 
@@ -34,6 +35,11 @@ pub async fn handle_admin_callback(
             .await?;
         return Ok(());
     }
+
+    let clear_redis = |client: crate::core::db::redis::RedisCache, uid: u64| async move {
+        let _ = client.delete(&format!("broadcast_setup:{}", uid)).await;
+        let _ = client.delete(&format!("broadcast_pending:{}", uid)).await;
+    };
 
     match data.as_str() {
         "admin:health" | "admin:refresh" => {
@@ -102,10 +108,58 @@ pub async fn handle_admin_callback(
             bot.answer_callback_query(q.id).await?;
         }
 
-        "admin:broadcast:cancel" => {
-            let redis_key = format!("broadcast_pending:{}", admin_id);
-            config.get_redis_client().delete(&redis_key).await?;
+        "admin:broadcast:mode:forward" | "admin:broadcast:mode:copy" => {
+            let setup_key = format!("broadcast_setup:{}", admin_id);
+            let saved_msg_data: Option<String> = config.get_redis_client().get(&setup_key).await?;
 
+            let Some(msg_data) = saved_msg_data else {
+                bot.answer_callback_query(q.id)
+                    .text("⏳ Данные устарели")
+                    .show_alert(true)
+                    .await?;
+                bot.delete_message(msg.chat().id, msg.id()).await?;
+                return Ok(());
+            };
+
+            let mode = if data.contains("forward") {
+                "forward"
+            } else {
+                "copy"
+            };
+
+            let pending_key = format!("broadcast_pending:{}", admin_id);
+            let final_data = format!("{}:{}", msg_data, mode);
+
+            config
+                .get_redis_client()
+                .set(&pending_key, &final_data, 300)
+                .await?;
+
+            let users_count = User::query().count().await.unwrap_or(0);
+
+            let text = format!(
+                "📢 <b>Подтверждение рассылки</b>\n\n\
+                👥 Получателей: <b>{}</b>\n\
+                ⚙️ Режим: <b>{}</b>\n\n\
+                ⚠️ <i>Действие необратимо. Начать?</i>",
+                users_count,
+                if mode == "forward" {
+                    "Пересылка (с автором)"
+                } else {
+                    "Копия (без автора)"
+                }
+            );
+
+            bot.edit_message_text(msg.chat().id, msg.id(), text)
+                .parse_mode(ParseMode::Html)
+                .reply_markup(confirm_broadcast_keyboard(users_count, mode))
+                .await?;
+
+            bot.answer_callback_query(q.id).await?;
+        }
+
+        "admin:broadcast:cancel" => {
+            clear_redis(config.get_redis_client().clone(), admin_id).await;
             bot.edit_message_text(msg.chat().id, msg.id(), "❌ <b>Рассылка отменена.</b>")
                 .parse_mode(ParseMode::Html)
                 .await?;
@@ -114,7 +168,6 @@ pub async fn handle_admin_callback(
 
         "admin:broadcast:confirm" => {
             let redis_key = format!("broadcast_pending:{}", admin_id);
-
             let saved_data: Option<String> = config.get_redis_client().get(&redis_key).await?;
 
             let Some(data_str) = saved_data else {
@@ -135,19 +188,24 @@ pub async fn handle_admin_callback(
             config.get_redis_client().delete(&redis_key).await?;
 
             let parts: Vec<&str> = data_str.split(':').collect();
-            if parts.len() != 2 {
+            if parts.len() != 3 {
                 bot.answer_callback_query(q.id)
                     .text("❌ Ошибка данных")
                     .await?;
                 return Ok(());
             }
+
             let from_chat_id = parts[0].parse::<i64>().unwrap();
             let message_id = parts[1].parse::<i32>().unwrap();
+            let mode = parts[2].to_string();
 
             bot.edit_message_text(
                 msg.chat().id,
                 msg.id(),
-                "🚀 <b>Рассылка запущена...</b>\n<i>Я пришлю отчет по завершении.</i>",
+                format!(
+                    "🚀 <b>Рассылка запущена (Mode: {})...</b>\n<i>Отчет придет по завершении.</i>",
+                    mode
+                ),
             )
             .parse_mode(ParseMode::Html)
             .await?;
@@ -165,6 +223,18 @@ pub async fn handle_admin_callback(
                 let mut success = 0;
                 let mut blocked = 0;
                 let mut failed = 0;
+
+                let mut error_log = String::new();
+                writeln!(&mut error_log, "Broadcast Error Report").unwrap();
+                writeln!(
+                    &mut error_log,
+                    "Time: {}",
+                    Local::now().format("%Y-%m-%d %H:%M:%S")
+                )
+                .unwrap();
+                writeln!(&mut error_log, "Mode: {}", mode).unwrap();
+                writeln!(&mut error_log, "-------------------------\n").unwrap();
+
                 let start_time = SystemTime::now();
 
                 for (i, user) in users.iter().enumerate() {
@@ -172,24 +242,59 @@ pub async fn handle_admin_callback(
                         sleep(Duration::from_secs(1)).await;
                     }
 
-                    match bot_clone
-                        .copy_message(
-                            ChatId(user.user_id.parse().unwrap_or(0)),
-                            ChatId(from_chat_id),
-                            MessageId(message_id),
-                        )
-                        .await
-                    {
+                    let chat_target = ChatId(user.user_id.parse().unwrap_or(0));
+
+                    let result = if mode == "forward" {
+                        bot_clone
+                            .forward_message(
+                                chat_target,
+                                ChatId(from_chat_id),
+                                MessageId(message_id),
+                            )
+                            .await
+                            .map(|_| ())
+                    } else {
+                        bot_clone
+                            .copy_message(chat_target, ChatId(from_chat_id), MessageId(message_id))
+                            .await
+                            .map(|_| ())
+                    };
+
+                    match result {
                         Ok(_) => success += 1,
-                        Err(teloxide::RequestError::Api(
-                            teloxide::ApiError::BotBlocked | teloxide::ApiError::UserDeactivated,
-                        )) => {
-                            blocked += 1;
-                            // todo: мб удалять его?
-                        }
-                        Err(_e) => {
-                            failed += 1;
-                        }
+                        Err(err) => match err {
+                            teloxide::RequestError::Api(api_err) => match api_err {
+                                teloxide::ApiError::BotBlocked
+                                | teloxide::ApiError::UserDeactivated => {
+                                    blocked += 1;
+                                    writeln!(
+                                        &mut error_log,
+                                        "[BLOCKED/DEACTIVATED] ID: {} | Error: {:?}",
+                                        user.user_id, api_err
+                                    )
+                                    .unwrap();
+                                    // TODO: remove from db?
+                                }
+                                _ => {
+                                    failed += 1;
+                                    writeln!(
+                                        &mut error_log,
+                                        "[API ERROR] ID: {} | Error: {:?}",
+                                        user.user_id, api_err
+                                    )
+                                    .unwrap();
+                                }
+                            },
+                            _ => {
+                                failed += 1;
+                                writeln!(
+                                    &mut error_log,
+                                    "[NETWORK/OTHER] ID: {} | Error: {:?}",
+                                    user.user_id, err
+                                )
+                                .unwrap();
+                            }
+                        },
                     }
                 }
 
@@ -198,30 +303,50 @@ pub async fn handle_admin_callback(
                     .unwrap_or_default()
                     .as_secs();
 
-                let report = format!(
+                let report_text = format!(
                     "✅ <b>Рассылка завершена!</b>\n\n\
+                    ⚙️ Режим: <b>{}</b>\n\
                     ⏱ Время: {} сек\n\
-                    👥 Всего в базе: {}\n\
-                    ✅ Доставлено: {}\n\
+                    👥 База: {}\n\
+                    ✅ Успешно: {}\n\
                     🚫 Заблокировали: {}\n\
-                    ❌ Ошибки: {}",
-                    duration, total, success, blocked, failed
+                    ❌ Ошибки API: {}",
+                    if mode == "forward" { "Forward" } else { "Copy" },
+                    duration,
+                    total,
+                    success,
+                    blocked,
+                    failed
                 );
 
                 let _ = bot_clone
-                    .send_message(admin_chat_id, report)
+                    .send_message(admin_chat_id, &report_text)
                     .parse_mode(ParseMode::Html)
                     .await;
+
+                if blocked > 0 || failed > 0 {
+                    let doc = InputFile::memory(error_log.into_bytes()).file_name(format!(
+                        "broadcast_errors_{}.txt",
+                        Local::now().format("%d_%m_%H_%M")
+                    ));
+
+                    let _ = bot_clone
+                        .send_document(admin_chat_id, doc)
+                        .caption("📄 Лог ошибок рассылки")
+                        .await;
+                }
             });
         }
         "admin:broadcast_help" => {
-            bot.answer_callback_query(q.id)
-                .text("Инструкция в чате")
-                .await?;
-            let help_text = "📢 <b>Как сделать рассылку:</b>\n\n\
-                             1. Напишите пост (текст, фото, видео - что угодно).\n\
-                             2. Сделайте ответ на этот пост командой <code>/broadcast</code>.\n\n\
-                             Бот скопирует сообщение и разошлет всем пользователям из базы.";
+            bot.answer_callback_query(q.id).text("Инструкция").await?;
+            let help_text = "📢 <b>Инструкция по рассылке:</b>\n\n\
+                             1. Напишите пост в ЛС боту.\n\
+                             2. Сделайте <b>Reply</b> (ответ) на этот пост командой <code>/broadcast</code>.\n\
+                             3. Выберите режим:\n\
+                                — <b>Forward:</b> Пользователь увидит пересланное сообщение (с ссылкой на автора/канал).\n\
+                                — <b>Copy:</b> Сообщение придет от имени бота (анонимно).\n\
+                             4. Подтвердите отправку.\n\n\
+                             После завершения бот пришлет файл с ошибками, если они будут.";
 
             bot.send_message(msg.chat().id, help_text)
                 .parse_mode(ParseMode::Html)

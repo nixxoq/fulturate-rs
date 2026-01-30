@@ -1,3 +1,5 @@
+use crate::bot::modules::refactor::RefactorModule;
+
 use super::{
     Module, cobalt::CobaltModule, currency::CurrencyModule, math::MathModule,
     speech_recognition::SpeechRecognitionModule, translate::TranslateModule,
@@ -25,6 +27,7 @@ impl ModuleManager {
             TranslateModule,
             MathModule,
             SpeechRecognitionModule,
+            RefactorModule
         ];
 
         let modules = modules

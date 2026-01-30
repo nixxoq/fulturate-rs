@@ -53,8 +53,6 @@ pub async fn handle_currency_inline(
     config: Arc<Config>,
     _me: Me,
 ) -> Result<(), MyError> {
-    debug!("Handling currency inline query: {}", &q.query);
-
     let locale = get_user_locale(&q.from, &config).await;
 
     let owner = Owner {
@@ -104,9 +102,7 @@ pub async fn handle_currency_inline(
                 e
             );
         }
-        _ => {
-            debug!("No currency conversion results for: {}", &q.query);
-        }
+        _ => {}
     }
 
     Ok(())

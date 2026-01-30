@@ -23,8 +23,8 @@ services:
     restart: unless-stopped
     networks:
       - fulturate-net
-#    ports:
-#      - "8081:8081"
+    #    ports:
+    #      - "8081:8081"
     env_file:
       - .env
     environment:
@@ -50,14 +50,15 @@ services:
       - .env
     environment:
       - CARGO_TARGET_DIR=/app/target
+    ports:
+      - "8082:8082"
     volumes:
       - .:/app
       - cargo-cache:/usr/local/cargo/registry
       - target-cache:/app/target
       - telegram_bot_api_data:/var/lib/telegram-bot-api
     command: >
-      sh -c '
-      if [ "$RELEASE" = "1" ]; then
+      sh -c ' if [ "$RELEASE" = "1" ]; then
         echo "Release"
         exec cargo run --release --bin fulturate
       else
@@ -66,14 +67,40 @@ services:
         fi
       '
 
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: fulturate_prometheus
+    restart: unless-stopped
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    networks:
+      - fulturate-net
+    ports:
+      - "9090:9090"
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: fulturate_grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000" # панель графаны (admin/admin)
+    networks:
+      - fulturate-net
+    volumes:
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+
 volumes:
   cargo-cache:
   target-cache:
   mongo_data:
   redis_data:
+  prometheus_data:
+  grafana_data:
   telegram_bot_api_data:
     driver: local
-
 
 networks:
   fulturate-net:
