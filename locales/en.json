@@ -156,6 +156,14 @@
       "send_btn": "Click to send whisper",
       "send_desc": "Message: %{msg}"
     },
+    "refactor": {
+      "btn_official": "Formal",
+      "btn_spellcheck": "Spellcheck",
+      "btn_beauty": "Beautify",
+      "btn_formulate": "Rephrase",
+      "btn_group_fix": "Fix Errors",
+      "btn_understand": "Explain Meaning"
+    },
     "speech": {
       "name": "Speech Recognition",
       "desc": "Transcribe and summarize voice messages.",
