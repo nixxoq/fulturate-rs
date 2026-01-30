@@ -677,11 +677,10 @@ impl CurrencyConverter {
             {
                 let converted = amount * from_rate / to_rate;
                 builder.push_str(&format!(
-                    "{} {} {}{} {}\n",
+                    "{} {}{} {}\n",
                     info.flag,
                     Self::format_value(converted),
                     info.symbol,
-                    target_code,
                     self.get_plural(converted, info, locale)
                 ));
             }
