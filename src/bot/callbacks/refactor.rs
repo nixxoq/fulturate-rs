@@ -16,20 +16,21 @@ pub async fn handle_refactor_callback(
     mode_str: &str,
     src_msg_id: i32,
 ) -> Result<(), MyError> {
-    let Some(msg) = q.message else { return Ok(()) };
-    let locale = get_chat_locale(msg.chat(), config).await;
+    let Some(msg) = q.message.as_ref().and_then(|m| m.regular_message()) else {
+        return Ok(());
+    };
+    let locale = get_chat_locale(&msg.chat, config).await;
 
-    let redis = config.get_redis_client();
     let cache_key = format!("refactor_src:{}", src_msg_id);
-    let text: Option<String> = redis.get(&cache_key).await?;
+    let text: Option<String> = config.get_redis_client().get(&cache_key).await?;
 
     let Some(text) = text else {
         bot.answer_callback_query(q.id)
             .text(t!("errors.cache_expired", locale = &locale))
             .await?;
         bot.edit_message_text(
-            msg.chat().id,
-            msg.id(),
+            msg.chat.id,
+            msg.id,
             t!("errors.cache_expired", locale = &locale),
         )
         .await?;
@@ -38,8 +39,8 @@ pub async fn handle_refactor_callback(
 
     bot.answer_callback_query(q.id).text("⏳ ...").await?;
     bot.edit_message_text(
-        msg.chat().id,
-        msg.id(),
+        msg.chat.id,
+        msg.id,
         t!("common.processing", locale = &locale),
     )
     .await?;
@@ -48,12 +49,12 @@ pub async fn handle_refactor_callback(
 
     match process_text(config, &text, mode).await {
         Ok(result) => {
-            bot.edit_message_text(msg.chat().id, msg.id(), result)
+            bot.edit_message_text(msg.chat.id, msg.id, result)
                 .parse_mode(ParseMode::Html)
                 .await?;
         }
         Err(e) => {
-            bot.edit_message_text(msg.chat().id, msg.id(), format!("Error: {}", e))
+            bot.edit_message_text(msg.chat.id, msg.id, format!("Error: {}", e))
                 .await?;
         }
     }

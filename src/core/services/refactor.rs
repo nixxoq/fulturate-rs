@@ -1,5 +1,4 @@
-use crate::core::config::Config;
-use crate::errors::MyError;
+use crate::{core::config::Config, errors::MyError};
 use gem_rs::{
     api::Models,
     client::GemSession,
@@ -12,7 +11,7 @@ pub enum RefactorMode {
     Spellcheck,
     Beauty,
     Formulate,
-    Polish, // и нет, это не польский, а полировка текста
+    Polish, // polish text
 }
 
 impl RefactorMode {
@@ -38,7 +37,6 @@ impl RefactorMode {
     }
 }
 
-// TODO: добавить возможность пользователю задавать свои инструкции (ПРЕМИУМ)
 pub async fn process_text(
     config: &Config,
     text: &str,
@@ -75,6 +73,7 @@ pub async fn process_text(
         }
     };
 
+    // TODO: добавить возможность пользователю задавать свои инструкции (ПРЕМИУМ)
     // let custom_task = user_instruction
     //     .map(|ins| format!("\nADDITIONAL USER TASK: {}", ins))
     //     .unwrap_or_default();

@@ -8,27 +8,42 @@ pub fn refactor_menu_keyboard(msg_id: i32, locale: &str) -> InlineKeyboardMarkup
 
     InlineKeyboardMarkup::new(vec![
         vec![btn(
-            &format!("👔 {}", t!("refactor.btn_official", locale = locale)),
+            &format!(
+                "👔 {}",
+                t!("modules.refactor.btn_official", locale = locale)
+            ),
             "official",
         )],
         vec![btn(
-            &format!("✍️ {}", t!("refactor.btn_spellcheck", locale = locale)),
+            &format!(
+                "✍️ {}",
+                t!("modules.refactor.btn_spellcheck", locale = locale)
+            ),
             "spellcheck",
         )],
         vec![btn(
-            &format!("✨ {}", t!("refactor.btn_beauty", locale = locale)),
+            &format!("✨ {}", t!("modules.refactor.btn_beauty", locale = locale)),
             "beauty",
         )],
         vec![btn(
-            &format!("🧠 {}", t!("refactor.btn_formulate", locale = locale)),
+            &format!(
+                "🧠 {}",
+                t!("modules.refactor.btn_formulate", locale = locale)
+            ),
             "formulate",
         )],
         vec![btn(
-            &format!("🛠 {}", t!("refactor.btn_group_fix", locale = locale)),
+            &format!(
+                "🛠 {}",
+                t!("modules.refactor.btn_group_fix", locale = locale)
+            ),
             "group_fix",
         )],
         vec![btn(
-            &format!("🧐 {}", t!("refactor.btn_understand", locale = locale)),
+            &format!(
+                "🧐 {}",
+                t!("modules.refactor.btn_understand", locale = locale)
+            ),
             "understand",
         )],
         vec![InlineKeyboardButton::callback(
