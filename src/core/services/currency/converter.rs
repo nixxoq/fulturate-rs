@@ -38,8 +38,11 @@ static RANGE_RIGHT_REGEX: Lazy<Regex> = Lazy::new(|| {
         .unwrap()
 });
 
-static MATH_AMOUNT_RE: Lazy<Regex> =
+static MATH_EXPR_LEFT_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"(?i)(?P<expr>[\d.,\skmbtкмбт+\-*/^()]+)$").unwrap());
+
+static MATH_EXPR_RIGHT_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"(?i)^(?P<expr>[\d.,\skmbtкмбт+\-*/^()]+)").unwrap());
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct DetectedCurrency {
@@ -225,8 +228,9 @@ impl CurrencyDetector {
             let code = &self.pattern_map[mat.pattern()];
             let (start, end) = (mat.start(), mat.end());
             let match_str = &text_lower[start..end];
+            let is_alpha = match_str.chars().any(char::is_alphabetic);
 
-            if match_str.chars().any(char::is_alphabetic) {
+            if is_alpha {
                 let prev = text_lower[..start].chars().last();
                 let next = text_lower[end..].chars().next();
                 if prev.is_some_and(char::is_alphabetic) || next.is_some_and(char::is_alphabetic) {
@@ -242,11 +246,28 @@ impl CurrencyDetector {
 
             let (left, right) = (&text[..start], &text[end..]);
 
-            if let Some(caps) = MATH_AMOUNT_RE.captures(left)
+            if !is_alpha
+                && match_str.chars().count() == 1
+                && let Some(caps) = MATH_EXPR_RIGHT_RE.captures(right)
+                && let Some(m) = caps.name("expr")
+                && let Some(amount) = Self::parse_complex_num(m.as_str())
+            {
+                results.push(DetectedCurrency {
+                    amount,
+                    currency_code: code.clone(),
+                    start,
+                    end: end + m.end(),
+                    match_start: start,
+                    match_end: end,
+                });
+                continue;
+            }
+
+            if let Some(caps) = MATH_EXPR_LEFT_RE.captures(left)
                 && let Some(m) = caps.name("expr")
             {
                 let expr_str = m.as_str();
-                let is_simple_range = expr_str
+                let is_range = expr_str
                     .chars()
                     .filter(|&c| matches!(c, '-' | '–' | '—'))
                     .count()
@@ -255,30 +276,26 @@ impl CurrencyDetector {
                         .chars()
                         .any(|c| matches!(c, '+' | '*' | '/' | '^' | '(' | ')'));
 
-                if !is_simple_range {
-                    if let Some(amount) = Self::parse_complex_amount(expr_str) {
-                        results.push(DetectedCurrency {
-                            amount,
-                            currency_code: code.clone(),
-                            start: start - (left.len() - m.start()),
-                            end,
-                            match_start: start,
-                            match_end: end,
-                        });
-                        continue;
-                    }
+                if !is_range && let Some(amount) = Self::parse_complex_num(expr_str) {
+                    results.push(DetectedCurrency {
+                        amount,
+                        currency_code: code.clone(),
+                        start: start - (left.len() - m.start()),
+                        end,
+                        match_start: start,
+                        match_end: end,
+                    });
+                    continue;
                 }
             }
 
-            let limit =
-                if match_str.chars().any(char::is_alphabetic) && match_str.chars().count() == 2 {
-                    1
-                } else {
-                    // 5
-                    2 // это шоб глубина была типа оффнута, мне просто лень делать эту настройку да
-                };
+            let limit = if is_alpha && match_str.chars().count() == 2 {
+                1
+            } else {
+                5
+            };
             if let Some((amount, f_start, f_end)) =
-                Self::find_amount(left, right, limit, start, end)
+                Self::find_amount(left, right, limit, start, end, !is_alpha)
             {
                 results.push(DetectedCurrency {
                     amount,
@@ -299,42 +316,44 @@ impl CurrencyDetector {
         limit: usize,
         s_idx: usize,
         e_idx: usize,
+        is_symbol: bool,
     ) -> Option<(f64, usize, usize)> {
-        if let Some(token) = left.split_whitespace().last()
-            && !left.chars().last().is_some_and(|c| c.is_ascii_digit())
+        if is_symbol
+            && let Some(token) = right.split_whitespace().next()
             && !token.starts_with(&BANNED_CHARACTERS[..])
-            && let Some((val, part)) = token
+        {
+            let part = token.split(['-', '–', '—', '…']).find(|s| !s.is_empty())?;
+            if let Some(val) = Self::parse_num(part) {
+                return Some((val, s_idx, e_idx + right.find(part)? + part.len()));
+            }
+        }
+
+        if let Some(token) = left.split_whitespace().last()
+            && !token.starts_with(&BANNED_CHARACTERS[..])
+        {
+            let part = token
                 .split(['-', '–', '—', '…'])
                 .filter(|s| !s.is_empty())
-                .next_back()
-                .and_then(|p| Self::parse_amount(p).map(|v| (v, p)))
-        {
-            return Some((val, left.rfind(token)? + token.rfind(part)?, e_idx));
+                .next_back()?;
+            if let Some(val) = Self::parse_num(part) {
+                return Some((val, left.rfind(part)?, e_idx));
+            }
         }
 
         let right_tokens: Vec<&str> = right.split_whitespace().take(limit).collect();
         for token in right_tokens {
-            if right.chars().next().is_some_and(|c| c.is_ascii_digit())
-                || token.starts_with(&BANNED_CHARACTERS[..])
-            {
+            if token.starts_with(&BANNED_CHARACTERS[..]) {
                 continue;
             }
-            if let Some((val, part)) = token
-                .split(['-', '–', '—', '…'])
-                .find(|s| !s.is_empty())
-                .and_then(|p| Self::parse_amount(p).map(|v| (v, p)))
-            {
-                return Some((
-                    val,
-                    s_idx,
-                    e_idx + right.find(token)? + token.find(part)? + part.len(),
-                ));
+            let part = token.split(['-', '–', '—', '…']).find(|s| !s.is_empty())?;
+            if let Some(val) = Self::parse_num(part) {
+                return Some((val, s_idx, e_idx + right.find(part)? + part.len()));
             }
         }
         None
     }
 
-    fn parse_complex_amount(s: &str) -> Option<f64> {
+    fn parse_complex_num(s: &str) -> Option<f64> {
         let mut s_clean = s.trim().to_lowercase();
         if s_clean.is_empty() {
             return None;
@@ -346,7 +365,6 @@ impl CurrencyDetector {
             }
         }
 
-        // FIXME: remove this sugar when you'll fix lexer in eidolon_lang
         let s_sanitized: String = s_clean
             .chars()
             .filter(|&c| {
@@ -362,10 +380,10 @@ impl CurrencyDetector {
             return Some(val);
         }
 
-        Self::parse_amount(s)
+        Self::parse_num(s)
     }
 
-    fn parse_amount(s: &str) -> Option<f64> {
+    fn parse_num(s: &str) -> Option<f64> {
         let s_clean = s
             .trim_start_matches(['(', '[', '{'])
             .replace(',', ".")
@@ -434,18 +452,16 @@ pub struct CurrencyConverter {
 
 #[derive(Error, Debug)]
 pub enum ConvertError {
-    #[error("Network request failed: {0}")]
+    #[error("Network error: {0}")]
     RequestError(#[from] reqwest::Error),
-    #[error("Failed to parse JSON response: {0}")]
+    #[error("JSON error: {0}")]
     ParseError(#[from] serde_json::Error),
-    #[error("Currency '{0}' not found in the configuration")]
+    #[error("Currency {0} not found")]
     CurrencyNotFound(String),
-    #[error("Rate for '{0}' not found")]
-    RateNotFound(String),
-    #[error("Failed to read config file: {0}")]
-    ConfigError(String),
-    #[error("No rates could be fetched")]
+    #[error("No rates fetched")]
     NoRatesFetched,
+    #[error("Config error: {0}")]
+    ConfigError(String),
 }
 
 impl CurrencyConverter {
@@ -467,14 +483,11 @@ impl CurrencyConverter {
             }
         }
 
-        let detector = Arc::new(CurrencyDetector::new(&currency_list));
-        let client = Client::builder().timeout(Duration::from_secs(10)).build()?;
-
         Ok(Self {
-            client: client.clone(),
+            client: Client::builder().timeout(Duration::from_secs(10)).build()?,
             cache: Arc::new(RwLock::new(None)),
             currencies,
-            detector,
+            detector: Arc::new(CurrencyDetector::new(&currency_list)),
             providers: vec![
                 Box::new(CoinbaseProvider),
                 Box::new(TonApiProvider {
@@ -496,12 +509,8 @@ impl CurrencyConverter {
         }
 
         let mut combined_rates = HashMap::new();
-        let futures: Vec<_> = self
-            .providers
-            .iter()
-            .map(|p| p.fetch(&self.client))
-            .collect();
-        let results = futures::future::join_all(futures).await;
+        let results =
+            futures::future::join_all(self.providers.iter().map(|p| p.fetch(&self.client))).await;
 
         for res in results {
             match res {
@@ -543,8 +552,8 @@ impl CurrencyConverter {
         }
 
         detected.sort_by(|a, b| {
-            (b.match_end - b.match_start)
-                .cmp(&(a.match_end - a.match_start))
+            (b.end - b.start)
+                .cmp(&(a.end - a.start))
                 .then_with(|| a.start.cmp(&b.start))
         });
 
@@ -557,10 +566,8 @@ impl CurrencyConverter {
                 filtered.push(item);
             }
         }
-        let mut detected = filtered;
-        let rates = self.get_rates().await?;
-        let mut items = Vec::new();
-        let mut handled_indices = Vec::new();
+        let (mut detected, rates) = (filtered, self.get_rates().await?);
+        let (mut items, mut handled_indices) = (Vec::new(), Vec::new());
 
         detected.sort_by(|a, b| a.start.cmp(&b.start));
         for (i, item) in detected.iter().enumerate() {
@@ -570,7 +577,7 @@ impl CurrencyConverter {
             let left = &text[..item.start];
             if let Some(caps) = RANGE_LEFT_REGEX.captures(left)
                 && let Some(m) = caps.name("num")
-                && let Some(min_val) = CurrencyDetector::parse_amount(m.as_str())
+                && let Some(min_val) = CurrencyDetector::parse_num(m.as_str())
             {
                 items.push(ProcessingItem::Range {
                     min: min_val,
@@ -584,7 +591,7 @@ impl CurrencyConverter {
             let right = &text[item.end..];
             if let Some(caps) = RANGE_RIGHT_REGEX.captures(right)
                 && let Some(m) = caps.name("num")
-                && let Some(max_val) = CurrencyDetector::parse_amount(m.as_str())
+                && let Some(max_val) = CurrencyDetector::parse_num(m.as_str())
             {
                 items.push(ProcessingItem::Range {
                     min: item.amount,
@@ -605,10 +612,10 @@ impl CurrencyConverter {
             && text.chars().any(|c| math_chars.contains(&c))
         {
             let mut expr = text.to_string();
-            let mut detected_for_math = detected.clone();
-            detected_for_math.sort_by(|a, b| b.start.cmp(&a.start));
+            let mut d_math = detected.clone();
+            d_math.sort_by(|a, b| b.start.cmp(&a.start));
             let mut is_math = true;
-            for item in &detected_for_math {
+            for item in &d_math {
                 if let Some(rate) = rates.get(&item.currency_code) {
                     expr.replace_range(item.start..item.end, &format!("({})", item.amount * rate));
                 } else {
@@ -622,7 +629,6 @@ impl CurrencyConverter {
                 }
             }
 
-            // FIXME: remove this sugar when you'll fix lexer in eidolon_lang
             let s_sanitized: String = expr
                 .chars()
                 .filter(|&c| {
@@ -685,7 +691,7 @@ impl CurrencyConverter {
                 ));
             }
         }
-        if builder.len() > expression.len() + 3 {
+        if builder.lines().count() > 2 {
             Some(builder)
         } else {
             None
