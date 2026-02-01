@@ -9,6 +9,7 @@ use crate::{
     core::{
         config::Config,
         db::schemas::{settings::Settings as DbSettings, user::User},
+        metrics::{ERRORS_COUNTER, MODULE_USAGE},
     },
     errors::{BotError, MyError},
     t,
@@ -33,7 +34,7 @@ use teloxide::{
     utils::html,
 };
 
-const QUEUE_LIMIT_FREE: usize = 2; // todo: 15
+const QUEUE_LIMIT_FREE: usize = 2;
 const QUEUE_LIMIT_PREMIUM: usize = 50;
 const REDIS_QUEUE_FREE: &str = "sr_queue:free";
 const REDIS_QUEUE_PREMIUM: &str = "sr_queue:premium";
@@ -179,6 +180,10 @@ async fn process_speech_job(bot: Bot, config: Config, job: SpeechJob) -> Result<
                 return Ok(());
             }
 
+            MODULE_USAGE
+                .with_label_values(&["speech_recognition", "transcribe"])
+                .inc();
+
             let keyboard = create_transcription_keyboard(0, text_parts.len(), job.user_id, &locale);
 
             bot.edit_message_text(
@@ -194,6 +199,9 @@ async fn process_speech_job(bot: Bot, config: Config, job: SpeechJob) -> Result<
             .await?;
         }
         Err(e) => {
+            ERRORS_COUNTER
+                .with_label_values(&["error.speech_recognition"])
+                .inc();
             error!("Processing failed for chat {}: {:?}", job.chat_id, e);
             let error_text = t!("speech.error_processing", locale = &locale);
             let retry_keyboard = create_retry_keyboard(job.message_id.0, "transcribe", 0, &locale);
@@ -259,6 +267,9 @@ pub async fn transcription_handler(
             .await
             && !cached.full_text.is_empty()
         {
+            MODULE_USAGE
+                .with_label_values(&["speech_recognition", "transcribe"])
+                .inc();
             let text_parts = split_text(&cached.full_text, 4000);
 
             let sent_msg = bot
@@ -565,6 +576,15 @@ pub async fn summarization_handler(
     };
 
     if let Some(cached_summary) = cache_entry.summary {
+        let action = if action_type == "retell" {
+            "retell"
+        } else {
+            "summary"
+        };
+        MODULE_USAGE
+            .with_label_values(&["speech_recognition", action])
+            .inc();
+
         let text_parts = split_text(&cached_summary, 4000);
 
         let icon = if action_type == "retell" {
@@ -632,6 +652,15 @@ pub async fn summarization_handler(
         Ok(new_summary)
             if !new_summary.is_empty() && !new_summary.contains("Не удалось получить") =>
         {
+            let action = if action_type == "retell" {
+                "retell"
+            } else {
+                "summary"
+            };
+            MODULE_USAGE
+                .with_label_values(&["speech_recognition", action])
+                .inc();
+
             cache_entry.summary = Some(new_summary.clone());
             cache.set(&file_cache_key, &cache_entry, 86400).await?;
 
@@ -655,6 +684,13 @@ pub async fn summarization_handler(
                 .await?;
         }
         _ => {
+            let err_label = if action_type == "retell" {
+                "error.speech_recognition_retell"
+            } else {
+                "error.speech_recognition_summary"
+            };
+            ERRORS_COUNTER.with_label_values(&[err_label]).inc();
+
             let error_text = t!("speech.failed_summary", locale = &locale);
             let retry_keyboard =
                 create_retry_keyboard(audio_message_id, action_type, cache_entry.attempt, &locale);
@@ -800,6 +836,9 @@ pub async fn retry_speech_handler(
         .await
         {
             Ok(cache_entry) => {
+                MODULE_USAGE
+                    .with_label_values(&["speech_recognition", "transcribe"])
+                    .inc();
                 let text_parts = split_text(&cache_entry.full_text, 4000);
                 let keyboard =
                     create_transcription_keyboard(0, text_parts.len(), query.from.id.0, &locale);
@@ -816,6 +855,9 @@ pub async fn retry_speech_handler(
                 .await?;
             }
             Err(_) => {
+                ERRORS_COUNTER
+                    .with_label_values(&["error.speech_recognition"])
+                    .inc();
                 let retry_keyboard = create_retry_keyboard(
                     replied_to_audio_message_id,
                     "transcribe",
@@ -874,6 +916,15 @@ pub async fn retry_speech_handler(
             Ok(new_summary)
                 if !new_summary.is_empty() && !new_summary.contains("Не удалось получить") =>
             {
+                let action = if action_type == "retell" {
+                    "retell"
+                } else {
+                    "summary"
+                };
+                MODULE_USAGE
+                    .with_label_values(&["speech_recognition", action])
+                    .inc();
+
                 cache_entry.summary = Some(new_summary.clone());
                 cache_entry.attempt = 0;
                 cache.set(&file_cache_key, &cache_entry, 86400).await?;
@@ -896,6 +947,13 @@ pub async fn retry_speech_handler(
                     .await?;
             }
             _ => {
+                let err_label = if action_type == "retell" {
+                    "error.speech_recognition_retell"
+                } else {
+                    "error.speech_recognition_summary"
+                };
+                ERRORS_COUNTER.with_label_values(&[err_label]).inc();
+
                 cache_entry.attempt = new_attempt;
                 let retry_keyboard = create_retry_keyboard(
                     replied_to_audio_message_id,

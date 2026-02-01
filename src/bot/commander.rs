@@ -6,6 +6,7 @@ use crate::{
         settings::settings_command_handler,
         speech_recognition::speech_recognition_handler,
         start::start_handler,
+        stats::stats_handler,
         translate::translate_handler,
     },
     core::{config::Config, metrics::COMMANDS_COUNTER},
@@ -28,6 +29,7 @@ pub async fn command_handlers(bot: Bot, message: Message, cmd: Command) -> Resul
             Command::Broadcast => "broadcast",
             Command::Refactor => "refactor",
             Command::Understand => "understand",
+            Command::Stats => "stats",
         };
         COMMANDS_COUNTER.with_label_values(&[command_name]).inc();
 
@@ -43,6 +45,8 @@ pub async fn command_handlers(bot: Bot, message: Message, cmd: Command) -> Resul
 
             Command::Refactor => refactor_command_handler(bot, message, &config).await,
             Command::Understand => understand_command_handler(bot, message, &config).await,
+
+            Command::Stats => stats_handler(bot, message, &config).await,
         }
     });
     Ok(())

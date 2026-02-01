@@ -30,6 +30,9 @@ pub enum Command {
     Refactor,
     #[command(description = "Understand text", alias = "explain")]
     Understand,
+
+    #[command(description = "Bot statistics and services status")]
+    Stats,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

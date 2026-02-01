@@ -16,6 +16,7 @@ use teloxide::prelude::*;
 #[derive(Clone)]
 pub struct Config {
     bot: Bot,
+    cobalt_base_api: String,
     cobalt_client: ccobalt::Client,
     #[allow(dead_code)]
     owners: Vec<String>,
@@ -58,7 +59,7 @@ impl Config {
         let bot = Bot::new(bot_token).set_api_url(url);
 
         let mut cobalt_client = ccobalt::Client::builder()
-            .base_url(cobalt_base_api)
+            .base_url(cobalt_base_api.clone())
             // .base_url("https://cobalt-backend.canine.tools/")
             // .base_url("http://127.0.0.1:9000")
             // .base_url("https://nixxo.local/")
@@ -147,6 +148,7 @@ impl Config {
 
         Config {
             bot,
+            cobalt_base_api,
             cobalt_client,
             owners,
             log_chat_id,
@@ -167,6 +169,10 @@ impl Config {
 
     pub fn get_bot(&self) -> &Bot {
         &self.bot
+    }
+
+    pub fn get_cobalt_base_api(&self) -> &str {
+        &self.cobalt_base_api
     }
 
     pub fn get_cobalt_client(&self) -> &ccobalt::Client {

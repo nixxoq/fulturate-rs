@@ -1,6 +1,9 @@
 use crate::{
     bot::modules::cobalt::CobaltSettings,
-    core::metrics::{API_LATENCY, MODULE_USAGE},
+    core::{
+        config::Config,
+        metrics::{API_LATENCY, INCOMING_UPDATES, MODULE_USAGE},
+    },
     errors::MyError,
 };
 use ccobalt::model::{
@@ -8,6 +11,7 @@ use ccobalt::model::{
     response::DownloadResponse,
 };
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub enum VideoQuality {
@@ -88,6 +92,65 @@ pub enum CobaltCache {
         height: u32,
         thumb_file_id: String,
     },
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug)]
+pub struct CobaltDirectoryResponse {
+    pub data: Vec<InstanceData>,
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug)]
+pub struct InstanceData {
+    pub api: String,
+    pub tests: HashMap<String, TestResult>,
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug)]
+pub struct TestResult {
+    pub friendly: Option<String>,
+    pub status: bool,
+}
+
+pub async fn get_cobalt_status(config: &Config) -> Result<Option<InstanceData>, MyError> {
+    let cache = config.get_redis_client();
+    let cache_key = "cobalt_status_cache";
+
+    if let Ok(Some(cached)) = cache.get::<String>(cache_key).await
+        && let Ok(data) = serde_json::from_str::<InstanceData>(&cached)
+    {
+        return Ok(Some(data));
+    }
+
+    let client = reqwest::Client::builder()
+        .user_agent("Fulturate/6.6.6 (rust) (+https://github.com/weever1337/fulturate-rs)")
+        .build()?;
+
+    let response = client
+        .get("https://cobalt.directory/api/tests")
+        .send()
+        .await?
+        .json::<CobaltDirectoryResponse>()
+        .await?;
+
+    let base_api = config
+        .get_cobalt_base_api()
+        .replace("https://", "")
+        .replace("http://", "")
+        .trim_end_matches('/')
+        .to_string();
+
+    let instance = response.data.into_iter().find(|i| i.api == base_api);
+
+    if let Some(ref found) = instance {
+        let encoded = serde_json::to_string(found)?;
+        let _: () = cache.set(cache_key, &encoded, 60).await?;
+    }
+
+    Ok(instance)
+}
+
+pub fn get_total_updates() -> u64 {
+    INCOMING_UPDATES.get()
 }
 
 pub async fn resolve_download_url(
