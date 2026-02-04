@@ -74,6 +74,7 @@ pub enum DownloadResult {
         url: String,
         original_url: String,
         filename: Option<String>,
+        duration: Option<u32>,
     },
     Photos {
         urls: Vec<String>,
@@ -201,6 +202,7 @@ pub async fn resolve_download_url(
                     url: video_item.url.clone(),
                     original_url: url.to_string(),
                     filename: None,
+                    duration: None,
                 }));
             }
             Ok(None)
@@ -228,6 +230,7 @@ pub async fn resolve_download_url(
                     url: c_url,
                     original_url: url.to_string(),
                     filename: Some(filename),
+                    duration: None,
                 }))
             }
         }
@@ -237,6 +240,7 @@ pub async fn resolve_download_url(
                 url: c_url,
                 original_url: url.to_string(),
                 filename: None,
+                duration: None,
             })),
     }
 }
