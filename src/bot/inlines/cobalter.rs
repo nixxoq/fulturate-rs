@@ -56,63 +56,174 @@ mod video_metadata {
         pub duration: u32,
         pub width: u32,
         pub height: u32,
-        pub thumbnail_url: Option<String>,
-        pub title: Option<String>,
     }
 
     #[derive(Deserialize)]
-    struct YtDlpOutput {
-        duration: Option<f64>,
-        width: Option<u32>,
-        height: Option<u32>,
-        thumbnail: Option<String>,
-        title: Option<String>,
+    struct FfprobeOutput {
+        streams: Option<Vec<FfprobeStream>>,
+        format: Option<FfprobeFormat>,
     }
 
-    pub async fn get_from_url(url: &str) -> Result<VideoMetadata, MyError> {
-        let ytdlp_output = Command::new("yt-dlp")
-            .args(["--js-runtimes", "node"])
-            .args(["--dump-json", url])
+    #[derive(Deserialize)]
+    struct FfprobeStream {
+        codec_type: Option<String>,
+        width: Option<u32>,
+        height: Option<u32>,
+        duration: Option<String>,
+    }
+
+    #[derive(Deserialize)]
+    struct FfprobeFormat {
+        duration: Option<String>,
+    }
+
+    pub async fn get_from_file(path: &Path) -> Result<VideoMetadata, MyError> {
+        let output = Command::new("ffprobe")
+            .args([
+                "-v", "quiet",
+                "-print_format", "json",
+                "-show_format",
+                "-show_streams",
+            ])
+            .arg(path)
             .output()
             .await?;
 
-        if !ytdlp_output.status.success() {
-            let stderr = String::from_utf8_lossy(&ytdlp_output.stderr);
-            log::error!("yt-dlp failed for URL '{}'. Stderr: {}", url, stderr);
-            return Err(anyhow::anyhow!("Failed to execute yt-dlp"));
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            log::error!("ffprobe failed for {:?}. Stderr: {}", path, stderr);
+            return Err(anyhow::anyhow!("Failed to execute ffprobe"));
         }
 
-        let metadata: YtDlpOutput = serde_json::from_slice(&ytdlp_output.stdout)?;
+        let probe: FfprobeOutput = serde_json::from_slice(&output.stdout)
+            .context("Failed to parse ffprobe output")?;
+
+        let mut width = 0u32;
+        let mut height = 0u32;
+        let mut stream_duration: Option<f64> = None;
+
+        if let Some(streams) = &probe.streams {
+            for stream in streams {
+                if stream.codec_type.as_deref() == Some("video") {
+                    width = stream.width.unwrap_or(0);
+                    height = stream.height.unwrap_or(0);
+                    if let Some(dur_str) = &stream.duration {
+                        stream_duration = dur_str.parse().ok();
+                    }
+                    break;
+                }
+            }
+        }
+
+        let duration = stream_duration
+            .or_else(|| {
+                probe.format
+                    .as_ref()
+                    .and_then(|f| f.duration.as_ref())
+                    .and_then(|d| d.parse().ok())
+            })
+            .unwrap_or(0.0) as u32;
+
         Ok(VideoMetadata {
-            duration: metadata.duration.unwrap_or(0.0) as u32,
-            width: metadata.width.unwrap_or(0),
-            height: metadata.height.unwrap_or(0),
-            thumbnail_url: metadata.thumbnail,
-            title: metadata.title,
+            duration,
+            width,
+            height,
         })
     }
 
-    pub async fn download_thumbnail(
-        url: &str,
+    pub async fn get_duration_from_url(url: &str, original_url: &str) -> Result<u32, MyError> {
+        if original_url.contains("youtube.com") || original_url.contains("youtu.be") {
+            if let Ok(duration) = get_youtube_duration(original_url).await {
+                log::debug!("Scraped YouTube duration for {}: {}s", original_url, duration);
+                return Ok(duration);
+            }
+        }
+
+        let output = Command::new("ffprobe")
+            .args([
+                "-v", "error",
+                "-print_format", "json",
+                "-show_format",
+                "-user_agent", "Fulturate/6.6.6 (rust) (+https://github.com/weever1337/fulturate-rs)",
+                "-analyzeduration", "15000000",
+                "-probesize", "15000000",
+            ])
+            .arg(url)
+            .output()
+            .await?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            log::warn!("ffprobe URL check failed for {}: {}", url, stderr);
+            return Err(anyhow::anyhow!("Failed to probe URL: {}", stderr));
+        }
+
+        let probe: FfprobeOutput = serde_json::from_slice(&output.stdout)
+            .context("Failed to parse ffprobe output")?;
+
+        let duration = probe.format
+            .as_ref()
+            .and_then(|f| f.duration.as_ref())
+            .and_then(|d| d.parse::<f64>().ok())
+            .unwrap_or(0.0) as u32;
+
+        log::debug!("ffprobe duration for {}: {}s", url, duration);
+
+        if duration < 15 && (original_url.contains("youtube.com") || original_url.contains("youtu.be")) {
+             if let Ok(scraped) = get_youtube_duration(original_url).await {
+                 log::debug!("ffprobe gave suspicious {}s, scraped YT duration: {}s", duration, scraped);
+                 return Ok(scraped);
+             }
+        }
+
+        Ok(duration)
+    }
+
+    async fn get_youtube_duration(url: &str) -> Result<u32, MyError> {
+        let client = reqwest::Client::builder()
+            .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+            .build()?;
+
+        let resp = client.get(url).send().await?.text().await?;
+
+        let re = regex::Regex::new(r#""lengthSeconds":\s*"?(\d+)"?"#).unwrap();
+        if let Some(caps) = re.captures(&resp) {
+            if let Ok(seconds) = caps[1].parse::<u32>() {
+                return Ok(seconds);
+            }
+        }
+
+        log::debug!("Could not find duration in YouTube page, length of response: {}", resp.len());
+        Err(anyhow::anyhow!("Could not find duration in YouTube page"))
+    }
+
+    pub async fn extract_thumbnail(
+        video_path: &Path,
         output_dir: &Path,
         file_hash: &str,
     ) -> Result<(PathBuf, TempGuard), MyError> {
         let thumb_path = output_dir.join(format!("{}_thumb.jpg", file_hash));
-        let response = reqwest::get(url).await?.bytes().await?;
 
-        let path_clone = thumb_path.clone();
-        tokio::task::spawn_blocking(move || -> Result<(), MyError> {
-            let img =
-                image::load_from_memory(&response).context("Failed to load image from memory")?;
-            let scaled = img.resize(320, 320, image::imageops::FilterType::Lanczos3);
+        let output = Command::new("ffmpeg")
+            .args([
+                "-i",
+            ])
+            .arg(video_path)
+            .args([
+                "-ss", "00:00:01",
+                "-vframes", "1",
+                "-vf", "scale=320:320:force_original_aspect_ratio=decrease",
+                "-y",
+            ])
+            .arg(&thumb_path)
+            .output()
+            .await?;
 
-            scaled
-                .save_with_format(&path_clone, image::ImageFormat::Jpeg)
-                .context("Failed to save scaled thumbnail")?;
-
-            Ok(())
-        })
-        .await??;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            log::warn!("ffmpeg thumbnail extraction failed: {}", stderr);
+            return Err(anyhow::anyhow!("Failed to extract thumbnail"));
+        }
 
         let guard = TempGuard {
             path: thumb_path.clone(),
@@ -143,7 +254,29 @@ fn build_results_from_media(
     locale: &str,
 ) -> Vec<InlineQueryResult> {
     match media {
-        DownloadResult::Video { .. } => {
+        DownloadResult::Video { duration, .. } => {
+            // дебаг пусть этот останется, пригодится
+            log::debug!("Building video result: duration={:?}s, limit={}s", duration, MAX_DURATION_SECONDS);
+            if let Some(d) = duration && d > MAX_DURATION_SECONDS {
+                log::debug!("Video too long ({} > {}), returning error article", d, MAX_DURATION_SECONDS);
+                let minutes = MAX_DURATION_SECONDS / 60;
+                let error_article = InlineQueryResultArticle::new(
+                    "error_duration",
+                    t!("modules.cobalt.error_duration_title", locale = locale),
+                    InputMessageContent::Text(InputMessageContentText::new(t!(
+                        "modules.cobalt.error_too_long",
+                        locale = locale,
+                        minutes = minutes
+                    ))),
+                )
+                .description(t!(
+                    "modules.cobalt.error_too_long",
+                    locale = locale,
+                    minutes = minutes
+                ));
+                return vec![error_article.into()];
+            }
+
             let url_kb = make_single_url_keyboard(original_url);
             let result = InlineQueryResultArticle::new(
                 format!("cobalt_video:{}", url_hash),
@@ -211,14 +344,51 @@ pub async fn handle_cobalt_inline(
     let redis = config.get_redis_client();
 
     if let Ok(Some(cached_entry)) = redis.get::<CobaltCache>(&cache_key).await {
-        let download_result = match cached_entry {
+        let mut download_result = match cached_entry {
             CobaltCache::Pending(dr) => dr,
-            CobaltCache::Ready { original_url, .. } => DownloadResult::Video {
+            CobaltCache::Ready {
+                original_url,
+                file_id: _,
+                thumb_file_id: _,
+                width: _,
+                height: _,
+                ..
+            } => DownloadResult::Video {
                 url: original_url.clone(),
                 original_url,
                 filename: None,
+                duration: None,
             },
         };
+
+        if let DownloadResult::Video {
+            url: download_url,
+            duration,
+            original_url,
+            ..
+        } = &mut download_result
+        {
+            if duration.is_none() {
+                log::debug!("Cache hit but duration missing for {}, probing...", download_url);
+                match video_metadata::get_duration_from_url(download_url, &original_url).await {
+                    Ok(d) => {
+                        log::debug!("Probed duration: {}s", d);
+                        *duration = Some(d);
+                        let _ = redis
+                            .set(
+                                &cache_key,
+                                &CobaltCache::Pending(download_result.clone()),
+                                24 * 60 * 60,
+                            )
+                            .await;
+                    }
+                    Err(e) => {
+                        log::warn!("Failed to probe cached video: {}", e);
+                    }
+                }
+            }
+        }
+
         let original_url = match &download_result {
             DownloadResult::Video { original_url, .. } => original_url.clone(),
             DownloadResult::Photos { original_url, .. } => original_url.clone(),
@@ -229,37 +399,26 @@ pub async fn handle_cobalt_inline(
         return Ok(());
     }
 
-    match video_metadata::get_from_url(url).await {
-        Ok(meta) if meta.duration > MAX_DURATION_SECONDS => {
-            let minutes = MAX_DURATION_SECONDS / 60;
-            let error_article = InlineQueryResultArticle::new(
-                "error_duration",
-                t!("modules.cobalt.error_duration_title", locale = &locale),
-                InputMessageContent::Text(InputMessageContentText::new(t!(
-                    "modules.cobalt.error_too_long",
-                    locale = &locale,
-                    minutes = minutes
-                ))),
-            )
-            .description(t!(
-                "modules.cobalt.error_too_long",
-                locale = &locale,
-                minutes = minutes
-            ));
-
-            bot.answer_inline_query(q.id, vec![error_article.into()])
-                .await?;
-            return Ok(());
-        }
-        Err(e) => log::warn!("Metadata fetch failed: {}", e),
-        _ => {}
-    }
-
     let settings = Settings::get_module_settings::<CobaltSettings>(&owner, "cobalt").await?;
     let cobalt_client = config.get_cobalt_client();
 
     let result_articles = match resolve_download_url(url, &settings, cobalt_client).await {
-        Ok(Some(download_result)) => {
+        Ok(Some(mut download_result)) => {
+            if let DownloadResult::Video {
+                url: download_url,
+                duration,
+                ..
+            } = &mut download_result
+            {
+                log::debug!("New resolve, probing duration for {}", download_url);
+                if let Ok(d) = video_metadata::get_duration_from_url(download_url, url).await {
+                    log::debug!("Probed duration: {}s", d);
+                    *duration = Some(d);
+                } else {
+                    log::warn!("Failed to probe new video duration");
+                }
+            }
+
             let cache_entry = CobaltCache::Pending(download_result.clone());
             redis.set(&cache_key, &cache_entry, 24 * 60 * 60).await?;
             build_results_from_media(url, download_result, &url_hash, user_id, &locale)
@@ -324,19 +483,25 @@ pub async fn handle_inline_video(
         Some(CobaltCache::Pending(DownloadResult::Video {
             url: _video_url,
             original_url,
+            duration,
             ..
         })) => {
+            if let Some(d) = duration && d > MAX_DURATION_SECONDS {
+                let minutes = MAX_DURATION_SECONDS / 60;
+                bot.edit_message_text_inline(
+                    &inline_message_id,
+                    t!(
+                        "modules.cobalt.error_too_long",
+                        locale = &locale,
+                        minutes = minutes
+                    ),
+                )
+                .await?;
+                return Ok(());
+            }
+
             let temp_dir = PathBuf::from("./temp_videos");
             fs::create_dir_all(&temp_dir).await?;
-
-            let meta = video_metadata::get_from_url(&original_url).await?;
-            let thumb_data = if let Some(thumb_url) = &meta.thumbnail_url {
-                video_metadata::download_thumbnail(thumb_url, &temp_dir, url_hash)
-                    .await
-                    .ok()
-            } else {
-                None
-            };
 
             bot.edit_message_text_inline(
                 &inline_message_id,
@@ -375,6 +540,22 @@ pub async fn handle_inline_video(
             let download_url = response
                 .get_download_url()
                 .ok_or_else(|| anyhow!("Cobalt returned no download URL (Picker or Error?)"))?;
+
+            if let Ok(duration) = video_metadata::get_duration_from_url(&download_url, &original_url).await {
+                if duration > MAX_DURATION_SECONDS {
+                    let minutes = MAX_DURATION_SECONDS / 60;
+                    bot.edit_message_text_inline(
+                        &inline_message_id,
+                        t!(
+                            "modules.cobalt.error_too_long",
+                            locale = &locale,
+                            minutes = minutes
+                        ),
+                    )
+                    .await?;
+                    return Ok(());
+                }
+            }
 
             let http_client = reqwest::Client::builder()
                 .user_agent(
@@ -454,6 +635,39 @@ pub async fn handle_inline_video(
 
             let _guard = TempGuard { path: path.clone() };
 
+            let meta = video_metadata::get_from_file(&path).await.unwrap_or_else(|e| {
+                log::warn!("Failed to get metadata from file: {}", e);
+                video_metadata::VideoMetadata {
+                    duration: 0,
+                    width: 0,
+                    height: 0,
+                }
+            });
+
+            log::debug!("Post-download metadata for {}: duration={}s, width={}, height={}", original_url, meta.duration, meta.width, meta.height);
+
+            if meta.duration > MAX_DURATION_SECONDS {
+                let minutes = MAX_DURATION_SECONDS / 60;
+                bot.edit_message_text_inline(
+                    &inline_message_id,
+                    t!(
+                        "modules.cobalt.error_too_long",
+                        locale = &locale,
+                        minutes = minutes
+                    ),
+                )
+                .await?;
+                return Ok(());
+            }
+
+            let thumb_data = if !is_audio {
+                video_metadata::extract_thumbnail(&path, &temp_dir, url_hash)
+                    .await
+                    .ok()
+            } else {
+                None
+            };
+
             let upload_client = reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(3600))
                 .connect_timeout(std::time::Duration::from_secs(60))
@@ -462,15 +676,9 @@ pub async fn handle_inline_video(
             let uploader = Bot::with_client(bot.token(), upload_client).set_api_url(bot.api_url());
 
             let sent_msg = if is_audio {
-                let mut audio_msg = uploader.send_audio(trash_channel, InputFile::file(&path));
-
-                if let Some(title) = &meta.title {
-                    audio_msg = audio_msg.title(title);
-                }
-                audio_msg = audio_msg.duration(meta.duration);
-                if let Some((path, _)) = &thumb_data {
-                    audio_msg = audio_msg.thumbnail(InputFile::file(path));
-                }
+                let audio_msg = uploader
+                    .send_audio(trash_channel, InputFile::file(&path))
+                    .duration(meta.duration);
 
                 audio_msg.await?
             } else {
@@ -480,8 +688,8 @@ pub async fn handle_inline_video(
                     .width(meta.width)
                     .height(meta.height);
 
-                if let Some((path, _)) = &thumb_data {
-                    video_msg = video_msg.thumbnail(InputFile::file(path));
+                if let Some((thumb_path, _)) = &thumb_data {
+                    video_msg = video_msg.thumbnail(InputFile::file(thumb_path));
                 }
 
                 video_msg.await?
