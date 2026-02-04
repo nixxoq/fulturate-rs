@@ -63,7 +63,8 @@ impl CobaltErrorType {
                 "error.api.content.video.unavailable"
                 | "error.api.content.video.age"
                 | "error.api.content.video.private"
-                | "error.api.content.video.region" => Self::Restricted,
+                | "error.api.content.video.region"
+                | "error.api.content.post.unavailable" => Self::Restricted,
                 _ => Self::Unknown,
             };
         }
