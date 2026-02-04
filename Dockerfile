@@ -1,9 +1,7 @@
 FROM rust:1-bookworm AS base
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    openssl ca-certificates libfontconfig1 ffmpeg curl python3 build-essential \
-    clang lld mold nodejs \
-    && curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp \
-    && chmod a+rx /usr/local/bin/yt-dlp \
+    openssl ca-certificates libfontconfig1 ffmpeg build-essential \
+    clang lld mold \
     && rm -rf /var/lib/apt/lists/*
 
 ENV RUSTFLAGS="-C link-arg=-fuse-ld=mold"
@@ -32,9 +30,7 @@ RUN cargo build --release --workspace
 
 FROM debian:bookworm-slim AS fulturate-release
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    openssl ca-certificates libfontconfig1 ffmpeg curl python3 nodejs \
-    && curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp \
-    && chmod a+rx /usr/local/bin/yt-dlp \
+    openssl ca-certificates libfontconfig1 ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=builder /app/fulturate/config.json .
