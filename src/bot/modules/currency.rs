@@ -27,6 +27,8 @@ use teloxide::{
 pub struct CurrencySettings {
     pub enabled: bool,
     pub selected_codes: Vec<String>,
+    #[serde(default)]
+    pub round_digits: Option<u8>,
 }
 
 impl Default for CurrencySettings {
@@ -43,6 +45,7 @@ impl Default for CurrencySettings {
         Self {
             enabled: true,
             selected_codes: default_currencies,
+            round_digits: None,
         }
     }
 }
@@ -111,6 +114,15 @@ module! {
                     }
                     changed = true;
                 }
+                "set_precision" if parts.len() >= 2 => {
+                    s.round_digits = match parts[1] {
+                        "2" => Some(2),
+                        "4" => Some(4),
+                        "6" => Some(6),
+                        _ => None, // "auto"
+                    };
+                    changed = true;
+                }
                 _ => {}
             }
 
@@ -175,6 +187,38 @@ impl CurrencyModule {
             format!("{}:settings:toggle_module:{}", self.key(), commander_id),
         );
 
+        let precision_options: &[(&str, &str)] = &[
+            ("auto", "🔢 Auto"),
+            ("2", "0.00"),
+            ("4", "0.0000"),
+            ("6", "0.000000"),
+        ];
+        let cur_prec_key = match settings.round_digits {
+            Some(2) => "2",
+            Some(4) => "4",
+            Some(6) => "6",
+            _ => "auto",
+        };
+        let precision_row: Vec<InlineKeyboardButton> = precision_options
+            .iter()
+            .map(|(key, label)| {
+                let lbl = if *key == cur_prec_key {
+                    format!("• {} •", label)
+                } else {
+                    label.to_string()
+                };
+                InlineKeyboardButton::callback(
+                    lbl,
+                    format!(
+                        "{}:settings:set_precision:{}:{}",
+                        self.key(),
+                        key,
+                        commander_id
+                    ),
+                )
+            })
+            .collect();
+
         let back_btn = InlineKeyboardButton::callback(
             t!("common.back", locale = &locale),
             format!(
@@ -206,7 +250,14 @@ impl CurrencyModule {
                 );
                 InlineKeyboardButton::callback(label, cb_data)
             });
-
+        keyboard.inline_keyboard.insert(0, precision_row);
+        keyboard.inline_keyboard.insert(
+            0,
+            vec![InlineKeyboardButton::callback(
+                t!("modules.currency.precision", locale = &locale),
+                "noop",
+            )],
+        );
         keyboard.inline_keyboard.insert(0, vec![toggle_btn]);
 
         Ok((text, keyboard))

@@ -27,22 +27,24 @@ pub const CURRENCY_CONFIG_PATH: &str = "currencies.json";
 const COINBASE_API_URL: &str = "https://api.coinbase.com/v2/exchange-rates?currency=UAH";
 const TONAPI_URL: &str = "https://tonapi.io/v2/rates";
 const BANNED_CHARACTERS: [char; 6] = ['@', '#', '/', '_', ':', '-'];
+const RANGE_CHARACTERS: [char; 4] = ['-', '–', '—', '…'];
+const MATH_CHARS: [char; 9] = ['.', ',', '+', '-', '*', '/', '^', '(', ')'];
 
 static RANGE_LEFT_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"(?i)(?P<num>\d+(?:[.,]\d+)?\s*(?:[kmbtкмбт]+)?)\s*(?:-|–|—|\.\.|to|до)\s*$")
+    Regex::new(r"(?i)(?P<num>\d+(?:[.,]\d+)?[\p{Zs}\t]*(?:[kmbtкмбт]+)?)[\p{Zs}\t]*(?:-|–|—|\.\.|to|до)[\p{Zs}\t]*$")
         .unwrap()
 });
 
 static RANGE_RIGHT_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"(?i)^\s*(?:-|–|—|\.\.|to|до)\s*(?P<num>\d+(?:[.,]\d+)?\s*(?:[kmbtкмбт]+)?)")
+    Regex::new(r"(?i)^[\p{Zs}\t]*(?:-|–|—|\.\.|to|до)[\p{Zs}\t]*(?P<num>\d+(?:[.,]\d+)?[\p{Zs}\t]*(?:[kmbtкмбт]+)?)")
         .unwrap()
 });
 
 static MATH_EXPR_LEFT_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"(?i)(?P<expr>[\d.,\skmbtкмбт+\-*/^()]+)$").unwrap());
+    Lazy::new(|| Regex::new(r"(?i)(?P<expr>[\d.,\p{Zs}\tkmbtкмбт+\-*/^()]+)$").unwrap());
 
 static MATH_EXPR_RIGHT_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"(?i)^(?P<expr>[\d.,\skmbtкмбт+\-*/^()]+)").unwrap());
+    Lazy::new(|| Regex::new(r"(?i)^(?P<expr>[\d.,\p{Zs}\tkmbtкмбт+\-*/^()]+)").unwrap());
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct DetectedCurrency {
@@ -72,6 +74,12 @@ impl ProcessingItem {
             Self::Range { start, .. } => *start,
         }
     }
+}
+
+struct FmtConfig<'a> {
+    targets: &'a [String],
+    locale: &'a str,
+    precision: Option<u8>,
 }
 
 #[derive(Debug, Clone)]
@@ -289,11 +297,30 @@ impl CurrencyDetector {
                 }
             }
 
-            let limit = if is_alpha && match_str.chars().count() == 2 {
-                1
-            } else {
+            if is_alpha
+                && match_str.chars().count() == 1
+                && text[end..]
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c.is_ascii_digit())
+            {
+                continue;
+            }
+
+            // FIXME: ну типа оно ж не умное и не умеет анализировать контекст да
+            // (ну это надо или лексер хуярить, который по токенам обрабатывает и ищет возможную связку в словах)
+            // поэтому ебейший костыль, который ток шо придумал
+            // если это не ASCII типа $, €, £, то на похуях +5 слов для проверки на значения
+            // если это типа USD, EUR, RUB - то до 2-х слов
+            // иначе хуй
+            let limit = if !is_alpha {
                 5
+            } else if match_str.eq_ignore_ascii_case(code) {
+                2
+            } else {
+                0
             };
+
             if let Some((amount, f_start, f_end)) =
                 Self::find_amount(left, right, limit, start, end, !is_alpha)
             {
@@ -318,38 +345,58 @@ impl CurrencyDetector {
         e_idx: usize,
         is_symbol: bool,
     ) -> Option<(f64, usize, usize)> {
+        let parse_right = |token: &str| -> Option<(f64, usize, usize)> {
+            let part = token.split(RANGE_CHARACTERS).find(|s| !s.is_empty())?;
+            let val = Self::parse_num(part)?;
+
+            let p_start = right.find(part)?;
+            let p_end = p_start + part.len();
+            let rem = &right[p_end..];
+
+            rem.split_whitespace()
+                .next()
+                .filter(|n| n.len() == 3 && n.chars().all(|c| c.is_ascii_digit()))
+                .and_then(|n| {
+                    let combined_val = Self::parse_num(&format!("{part}{n}"))?;
+                    let c_end = e_idx + p_end + rem.find(n)? + n.len();
+                    Some((combined_val, s_idx, c_end))
+                })
+                .or(Some((val, s_idx, e_idx + p_end)))
+        };
+
         if is_symbol
             && let Some(token) = right.split_whitespace().next()
             && !token.starts_with(&BANNED_CHARACTERS[..])
+            && let Some(res) = parse_right(token)
         {
-            let part = token.split(['-', '–', '—', '…']).find(|s| !s.is_empty())?;
-            if let Some(val) = Self::parse_num(part) {
-                return Some((val, s_idx, e_idx + right.find(part)? + part.len()));
-            }
+            return Some(res);
         }
 
         if let Some(token) = left.split_whitespace().last()
             && !token.starts_with(&BANNED_CHARACTERS[..])
-        {
-            let part = token
-                .split(['-', '–', '—', '…'])
+            && let Some(part) = token
+                .split(RANGE_CHARACTERS)
                 .filter(|s| !s.is_empty())
-                .next_back()?;
-            if let Some(val) = Self::parse_num(part) {
-                return Some((val, left.rfind(part)?, e_idx));
-            }
+                .next_back()
+            && let Some(val) = Self::parse_num(part)
+        {
+            return Some((val, left.rfind(part)?, e_idx));
         }
 
-        let right_tokens: Vec<&str> = right.split_whitespace().take(limit).collect();
-        for token in right_tokens {
+        for token in right.split_whitespace().take(limit) {
             if token.starts_with(&BANNED_CHARACTERS[..]) {
                 continue;
             }
-            let part = token.split(['-', '–', '—', '…']).find(|s| !s.is_empty())?;
-            if let Some(val) = Self::parse_num(part) {
-                return Some((val, s_idx, e_idx + right.find(part)? + part.len()));
+
+            if let Some(res) = parse_right(token) {
+                return Some(res);
+            }
+
+            if token.chars().any(|c| c.is_alphabetic()) {
+                break;
             }
         }
+
         None
     }
 
@@ -367,10 +414,7 @@ impl CurrencyDetector {
 
         let s_sanitized: String = s_clean
             .chars()
-            .filter(|&c| {
-                c.is_ascii_digit()
-                    || matches!(c, '.' | ',' | '+' | '-' | '*' | '/' | '^' | '(' | ')' | ' ')
-            })
+            .filter(|&c| c.is_ascii_digit() || MATH_CHARS.contains(&c))
             .collect();
 
         if let Ok(ast) = eidolon_lang::parse_eidolon_source(&s_sanitized)
@@ -384,61 +428,81 @@ impl CurrencyDetector {
     }
 
     fn parse_num(s: &str) -> Option<f64> {
-        let s_clean = s
+        let trimmed = s.trim();
+        let bytes = trimmed.as_bytes();
+
+        if matches!(
+            (bytes.first(), bytes.last()),
+            (Some(b'('), Some(b')')) | (Some(b'['), Some(b']')) | (Some(b'{'), Some(b'}'))
+        ) {
+            return None;
+        }
+
+        let s_clean = trimmed
             .trim_start_matches(['(', '[', '{'])
             .replace(',', ".")
             .replace(['_', ' '], "")
             .to_lowercase();
-        if s_clean.is_empty()
-            || !s_clean
-                .chars()
-                .next()
-                .is_some_and(|c| c.is_ascii_digit() || c == '.')
-        {
+
+        if !s_clean.starts_with(|c: char| c.is_ascii_digit() || c == '.') {
             return None;
         }
 
-        let (mut total, mut rest) = (0.0, s_clean.as_str());
-        while !rest.is_empty() {
+        let mut rest = s_clean.as_str();
+        let total = std::iter::from_fn(|| {
+            if rest.is_empty() {
+                return None;
+            }
+
             let digit_end = rest
                 .find(|c: char| !c.is_ascii_digit() && c != '.')
                 .unwrap_or(rest.len());
-            let (num_s, remainder) = rest.split_at(digit_end);
+
+            let (num_s, rem) = rest.split_at(digit_end);
+
             if num_s.is_empty() {
-                break;
+                return None;
             }
 
-            let value = num_s.parse::<f64>().ok()?;
-            rest = remainder;
+            let Ok(value) = num_s.parse::<f64>() else {
+                return Some(Err(()));
+            };
 
-            let suffix_end = rest
+            let suffix_end = rem
                 .find(|c: char| c.is_ascii_digit() || c == '.')
-                .unwrap_or(rest.len());
-            let (suffix, remainder) = rest.split_at(suffix_end);
+                .unwrap_or(rem.len());
 
-            if suffix.starts_with(['-', '–', '—']) || suffix.starts_with("..") {
-                total += value;
-                break;
+            let (suffix, next_rest) = rem.split_at(suffix_end);
+
+            if suffix.starts_with(RANGE_CHARACTERS) || suffix.starts_with("..") {
+                rest = "";
+                return Some(Ok(value));
             }
 
             let clean_suffix = suffix.trim_end_matches([')', ']']);
-            if !clean_suffix.is_empty() {
-                let info = WORD_VALUES.get(clean_suffix)?;
-                if !info.is_multiplier {
-                    return None;
-                }
-                total += value * info.value;
-            } else {
-                total += value;
-            }
-            rest = remainder;
-        }
 
-        if total > 0.0 || s_clean.contains('0') {
-            Some(total)
-        } else {
-            None
-        }
+            if clean_suffix.is_empty() {
+                rest = next_rest;
+                return Some(Ok(value));
+            }
+
+            if !clean_suffix.starts_with(char::is_alphabetic) {
+                rest = "";
+                return Some(Ok(value));
+            }
+
+            match WORD_VALUES.get(clean_suffix).filter(|i| i.is_multiplier) {
+                Some(info) => {
+                    rest = next_rest;
+                    Some(Ok(value * info.value))
+                }
+                None => Some(Err(())),
+            }
+        })
+        .try_fold(0.0, |acc, res| res.map(|val| acc + val))
+        .ok()?;
+
+        (total > 0.0 || s_clean.contains('0')).then_some(total)
     }
 }
 
@@ -631,10 +695,7 @@ impl CurrencyConverter {
 
             let s_sanitized: String = expr
                 .chars()
-                .filter(|&c| {
-                    c.is_ascii_digit()
-                        || matches!(c, '.' | ',' | '+' | '-' | '*' | '/' | '^' | '(' | ')' | ' ')
-                })
+                .filter(|&c| c.is_ascii_digit() || MATH_CHARS.contains(&c))
                 .collect();
 
             if is_math
@@ -646,8 +707,11 @@ impl CurrencyConverter {
                     val,
                     "UAH",
                     &rates,
-                    &settings.selected_codes,
-                    locale,
+                    FmtConfig {
+                        targets: &settings.selected_codes,
+                        locale,
+                        precision: settings.round_digits,
+                    },
                 )
             {
                 return Ok(vec![r]);
@@ -657,9 +721,13 @@ impl CurrencyConverter {
         let mut results = Vec::new();
         items.sort_by_key(|a| a.start());
         for item in items {
-            if let Some(res) =
-                self.format_conversion_item(&item, &rates, &settings.selected_codes, locale)
-            {
+            if let Some(res) = self.format_conversion_item(
+                &item,
+                &rates,
+                &settings.selected_codes,
+                locale,
+                settings.round_digits,
+            ) {
                 results.push(res);
             }
         }
@@ -672,12 +740,11 @@ impl CurrencyConverter {
         amount: f64,
         from_code: &str,
         rates: &HashMap<String, f64>,
-        targets: &[String],
-        locale: &str,
+        config: FmtConfig,
     ) -> Option<String> {
         let from_rate = rates.get(from_code)?;
         let mut builder = format!("{}:\n\n", expression);
-        for target_code in targets {
+        for target_code in config.targets {
             if let (Some(info), Some(to_rate)) =
                 (self.currencies.get(target_code), rates.get(target_code))
             {
@@ -685,9 +752,9 @@ impl CurrencyConverter {
                 builder.push_str(&format!(
                     "{} {}{} {}\n",
                     info.flag,
-                    Self::format_value(converted),
+                    Self::format_value(converted, config.precision),
                     info.symbol,
-                    self.get_plural(converted, info, locale)
+                    self.get_plural(converted, info, config.locale)
                 ));
             }
         }
@@ -704,9 +771,12 @@ impl CurrencyConverter {
         rates: &HashMap<String, f64>,
         targets: &[String],
         locale: &str,
+        precision: Option<u8>,
     ) -> Option<String> {
         match item {
-            ProcessingItem::Single(d) => self.format_conversion(d, rates, targets, locale),
+            ProcessingItem::Single(d) => {
+                self.format_conversion(d, rates, targets, locale, precision)
+            }
             ProcessingItem::Range {
                 min,
                 max,
@@ -718,8 +788,8 @@ impl CurrencyConverter {
                 let mut builder = format!(
                     "{} {} – {}{} {}\n\n",
                     info.flag,
-                    Self::format_value(*min),
-                    Self::format_value(*max),
+                    Self::format_value(*min, precision),
+                    Self::format_value(*max, precision),
                     info.symbol,
                     self.get_plural(*max, info, locale)
                 );
@@ -734,8 +804,8 @@ impl CurrencyConverter {
                         builder.push_str(&format!(
                             "{} {} – {}{} {}\n",
                             target_info.flag,
-                            Self::format_value(min_c),
-                            Self::format_value(max_c),
+                            Self::format_value(min_c, precision),
+                            Self::format_value(max_c, precision),
                             target_info.symbol,
                             self.get_plural(max_c, target_info, locale)
                         ));
@@ -756,13 +826,14 @@ impl CurrencyConverter {
         rates: &HashMap<String, f64>,
         targets: &[String],
         locale: &str,
+        precision: Option<u8>,
     ) -> Option<String> {
         let info = self.currencies.get(&item.currency_code)?;
         let from_rate = rates.get(&item.currency_code)?;
         let mut builder = format!(
             "{} {}{} {}\n\n",
             info.flag,
-            Self::format_value(item.amount),
+            Self::format_value(item.amount, precision),
             info.symbol,
             self.get_plural(item.amount, info, locale)
         );
@@ -777,7 +848,7 @@ impl CurrencyConverter {
                 builder.push_str(&format!(
                     "{} {}{} {}\n",
                     target_info.flag,
-                    Self::format_value(conv),
+                    Self::format_value(conv, precision),
                     target_info.symbol,
                     self.get_plural(conv, target_info, locale)
                 ));
@@ -791,17 +862,26 @@ impl CurrencyConverter {
         }
     }
 
-    fn format_value(val: f64) -> String {
+    fn format_value(val: f64, precision: Option<u8>) -> String {
         if val == 0.0 {
             return "0.00".to_string();
         }
-        if val < 0.01 {
-            format!("{:.14}", val)
-                .trim_end_matches('0')
-                .trim_end_matches('.')
-                .to_string()
+        let (decimals, trim_zeros) = if let Some(p) = precision {
+            (p as usize, false)
+        } else if val < 0.001 {
+            (8, true)
+        } else if val < 0.01 {
+            (6, true)
+        } else if val < 1.0 {
+            (4, true)
         } else {
-            format!("{:.2}", val)
+            (2, false)
+        };
+        let s = format!("{:.prec$}", val, prec = decimals);
+        if trim_zeros {
+            s.trim_end_matches('0').trim_end_matches('.').to_string()
+        } else {
+            s
         }
     }
 
@@ -866,4 +946,91 @@ pub fn get_default_currencies() -> Result<Vec<CurrencyStruct>, MyError> {
             ["uah", "rub", "usd", "byn", "eur", "ton"].contains(&c.code.to_lowercase().as_str())
         })
         .collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn multiplier() {
+        assert_eq!(CurrencyDetector::parse_num("5k"), Some(5_000.0));
+        assert_eq!(CurrencyDetector::parse_num("2m"), Some(2_000_000.0));
+    }
+
+    #[test]
+    #[allow(clippy::approx_constant)]
+    fn parsing_test() {
+        assert_eq!(CurrencyDetector::parse_num("(5801108895304779062)"), None);
+        assert_eq!(CurrencyDetector::parse_num("(12345)"), None);
+        assert_eq!(CurrencyDetector::parse_num("12345"), Some(12345.0));
+
+        assert_eq!(CurrencyDetector::parse_num("100"), Some(100.0));
+        assert_eq!(CurrencyDetector::parse_num("3.14"), Some(3.14));
+        assert_eq!(CurrencyDetector::parse_num("1,5"), Some(1.5));
+
+        assert_eq!(CurrencyDetector::parse_num("95б"), Some(95_000_000_000.0));
+        assert_eq!(CurrencyDetector::parse_num("95~б"), Some(95.0));
+    }
+
+    #[test]
+    fn value_auto_precision() {
+        assert_eq!(CurrencyConverter::format_value(100.0, None), "100.00");
+        assert_eq!(CurrencyConverter::format_value(1.50, None), "1.50");
+        assert_eq!(CurrencyConverter::format_value(0.0672, None), "0.0672");
+        assert_eq!(CurrencyConverter::format_value(0.05, None), "0.05");
+        assert_eq!(CurrencyConverter::format_value(0.000123, None), "0.000123");
+    }
+
+    #[test]
+    fn value_precision() {
+        assert_eq!(CurrencyConverter::format_value(0.0672, Some(2)), "0.07");
+        assert_eq!(CurrencyConverter::format_value(0.0672, Some(4)), "0.0672");
+        assert_eq!(CurrencyConverter::format_value(100.0, Some(4)), "100.0000");
+    }
+
+    fn make_detector() -> CurrencyDetector {
+        let content = std::fs::read_to_string(CURRENCY_CONFIG_PATH).expect("currencies.json");
+        let currencies: Vec<CurrencyStruct> = serde_json::from_str(&content).expect("parse");
+        CurrencyDetector::new(&currencies)
+    }
+
+    #[test]
+    fn wrong_context() {
+        let d = make_detector();
+        let text = "Google is not releasing the Android 17 beta today";
+        let results = d.detect(text);
+        assert!(
+            results.iter().all(|r| r.currency_code != "NOT"),
+            "NOT coin should not fire in sentence: {:?}",
+            results
+        );
+    }
+
+    #[test]
+    fn throw_wrong_id() {
+        let d = make_detector();
+        let text = "\u{1F48E} Price: 50\n\n\u{2116} 22 (5801108895304779062)";
+        let results = d.detect(text);
+        for r in &results {
+            assert!(
+                r.amount < 1_000_000_000_000.0,
+                "Anomalously large amount: {:?}",
+                r
+            );
+        }
+    }
+
+    #[test]
+    fn space_separated() {
+        let d = make_detector();
+        let results = d.detect("$562 800");
+        assert!(
+            results
+                .iter()
+                .any(|r| r.currency_code == "USD" && (r.amount - 562800.0).abs() < 1.0),
+            "Expected USD 562800, got: {:?}",
+            results
+        );
+    }
 }
