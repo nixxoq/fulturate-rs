@@ -4,11 +4,11 @@
 </div>
 
 > [!WARNING]
-> It was a fascinating experience in developing a bot. 
-> 
+> It was a fascinating experience in developing a bot.
+>
 > Through this project, I enhanced my advanced Rust skills by working on the bot’s internal code and implementing its modules (I especially learned a lot about macros).
-> 
-> I decided to share my work (post-0.14.4 ver.) to show how the bot was originally written and to what extent the workarounds sped up the code (sometimes!); 
+>
+> I decided to share my work (post-0.14.4 ver.) to show how the bot was originally written and to what extent the workarounds sped up the code (sometimes!);
 
 ## 🔗 Links:
 - **News Channel**: [Fulturate News](https://t.me/Fulturate)
