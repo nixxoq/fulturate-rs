@@ -14,7 +14,7 @@ pub async fn stats_handler(bot: Bot, msg: Message, config: &Config) -> Result<()
         .reply_to(msg.id)
         .await?;
 
-    let status_data = get_cobalt_status(&config).await.ok().flatten();
+    let status_data = get_cobalt_status(config).await.ok().flatten();
     let total_updates = get_total_updates();
 
     let response_text = format_stats_message(config.get_version(), total_updates, status_data);
@@ -36,12 +36,8 @@ fn format_stats_message(version: &str, updates: u64, status: Option<InstanceData
 
     match status {
         Some(instance) => {
-            let _ = writeln!(
-                f,
-                "<b>Cobalt Instance:</b> <code>{}</code>",
-                instance.api
-            );
-            let _ = f.push_str("<blockquote expandable>");
+            let _ = writeln!(f, "<b>Cobalt Instance:</b> <code>{}</code>", instance.api);
+            f.push_str("<blockquote expandable>");
 
             let mut tests: Vec<_> = instance
                 .tests
@@ -57,10 +53,10 @@ fn format_stats_message(version: &str, updates: u64, status: Option<InstanceData
                 let _ = writeln!(f, "{name} - {icon}");
             }
 
-            let _ = f.push_str("</blockquote>");
+            f.push_str("</blockquote>");
         }
         None => {
-            let _ = f.push_str("⚠️ <i>Cobalt instance status unavailable.</i>");
+            f.push_str("⚠️ <i>Cobalt instance status unavailable.</i>");
         }
     }
 

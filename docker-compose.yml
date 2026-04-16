@@ -29,8 +29,8 @@ services:
       - .env
     environment:
       - TELEGRAM_LOCAL=1
-      - TELEGRAM_API_ID=28090001
-      - TELEGRAM_API_HASH=a38cfe08329526d8cb130acbdddacbbd
+      - TELEGRAM_API_ID={ID}
+      - TELEGRAM_API_HASH={HASH}
     volumes:
       - telegram_bot_api_data:/var/lib/telegram-bot-api
 
@@ -85,7 +85,7 @@ services:
     container_name: fulturate_grafana
     restart: unless-stopped
     ports:
-      - "3000:3000" # панель графаны (admin/admin)
+      - "3000:3000" # (admin/admin)
     networks:
       - fulturate-net
     volumes:

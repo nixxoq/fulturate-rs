@@ -2,8 +2,8 @@ use crate::{
     bot::keyboards::cobalt::make_photo_pagination_keyboard,
     core::{config::Config, services::cobalt::DownloadResult},
     errors::MyError,
-    util::i18n::get_locale_by_id,
     t,
+    util::i18n::get_locale_by_id,
 };
 use std::sync::Arc;
 use teloxide::{

@@ -9,8 +9,8 @@ use crate::{
         services::speech_recognition::back_handler,
     },
     errors::MyError,
-    util::{i18n::get_locale_by_id, is_admin_or_author},
     t,
+    util::{i18n::get_locale_by_id, is_admin_or_author},
 };
 use log::error;
 use mongodb::bson::doc;

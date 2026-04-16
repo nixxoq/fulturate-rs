@@ -6,8 +6,8 @@ use crate::{
         services::cobalt::{AudioQuality, VideoQuality},
     },
     errors::MyError,
-    util::i18n::get_locale_by_owner,
     t,
+    util::i18n::get_locale_by_owner,
 };
 use serde::{Deserialize, Serialize};
 use teloxide::{

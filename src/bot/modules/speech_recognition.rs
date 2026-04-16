@@ -13,6 +13,7 @@ use teloxide::{
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub enum SpeechModel {
+    Gemini25FlashLite,
     Gemini25Flash,
     Gemini25Pro,
     Gemini3Flash,
@@ -21,6 +22,7 @@ pub enum SpeechModel {
 impl SpeechModel {
     pub fn display_name(&self) -> &str {
         match self {
+            Self::Gemini25FlashLite => "Gemini 2.5 Flash-Lite",
             Self::Gemini25Flash => "Gemini 2.5 Flash",
             Self::Gemini3Flash => "Gemini 3 Flash",
             Self::Gemini25Pro => "Gemini 2.5 Pro",
@@ -29,6 +31,7 @@ impl SpeechModel {
 
     pub fn api_key(&self) -> &str {
         match self {
+            Self::Gemini25FlashLite => "gemini-2.5-flash-lite",
             Self::Gemini25Flash => "gemini-2.5-flash",
             Self::Gemini3Flash => "gemini-3-flash-preview",
             Self::Gemini25Pro => "gemini-2.5-pro",
@@ -39,6 +42,7 @@ impl SpeechModel {
         match s {
             "Gemini 2.5 Pro" => Self::Gemini25Pro,
             "Gemini 3 Flash" => Self::Gemini3Flash,
+            "Gemini 2.5 Flash-Lite" => Self::Gemini25FlashLite,
             _ => Self::Gemini25Flash,
         }
     }

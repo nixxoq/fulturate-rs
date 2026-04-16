@@ -1,5 +1,6 @@
 use crate::{
-    util::paginator::{FrameBuild, Paginator}, t
+    t,
+    util::paginator::{FrameBuild, Paginator},
 };
 // use rust_i18n::t;
 use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup};

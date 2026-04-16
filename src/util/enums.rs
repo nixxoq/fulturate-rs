@@ -40,6 +40,8 @@ pub struct AudioStruct {
     pub mime_type: String,
     pub file_id: String,
     pub file_unique_id: String,
+    #[serde(default)]
+    pub duration_seconds: Option<u32>,
 }
 
 pub enum CobaltErrorType {

@@ -1,8 +1,8 @@
 use crate::{
     core::{config::Config, services::speech_recognition::transcription_handler},
     errors::MyError,
-    util::i18n::get_chat_locale,
     t,
+    util::i18n::get_chat_locale,
 };
 use teloxide::{prelude::*, types::ReplyParameters};
 

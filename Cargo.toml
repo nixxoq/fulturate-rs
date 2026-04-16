@@ -4,7 +4,7 @@ version = "0.14.5"
 edition = "2024"
 
 [dependencies]
-teloxide = { version = "0.17.0", features = ["full"] }
+teloxide = { git = "https://github.com/nixxoq/teloxide.git", rev = "8c08184dfdc9605c73b07d214f54253faa7cd2ab", features = ["full"] }
 tokio = { version = "1", features = ["full"] }
 dotenv = "0.15"
 sysinfo = "0.37.0"
@@ -40,3 +40,7 @@ anyhow = "1.0.100"
 chrono = "0.4.42"
 prometheus = "0.14.0"
 warp = { version = "0.4", features = ["server"] }
+meval = "0.2.0"
+
+[patch."https://github.com/Fulturate/Gem-rs.git"]
+gem-rs = { path = "gem-rs" }

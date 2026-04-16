@@ -117,7 +117,8 @@
       "desc": "Convert currencies and crypto with live rates.",
       "select_header": "Select currencies to display.",
       "removed": "Successfully removed %{code} from currency conversion.",
-      "added": "Successfully added %{code} from currency conversion."
+      "added": "Successfully added %{code} from currency conversion.",
+      "precision": "Precision"
     },
     "math": {
       "name": "Math",

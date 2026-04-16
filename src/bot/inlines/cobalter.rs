@@ -80,8 +80,10 @@ mod video_metadata {
     pub async fn get_from_file(path: &Path) -> Result<VideoMetadata, MyError> {
         let output = Command::new("ffprobe")
             .args([
-                "-v", "quiet",
-                "-print_format", "json",
+                "-v",
+                "quiet",
+                "-print_format",
+                "json",
                 "-show_format",
                 "-show_streams",
             ])
@@ -95,8 +97,8 @@ mod video_metadata {
             return Err(anyhow::anyhow!("Failed to execute ffprobe"));
         }
 
-        let probe: FfprobeOutput = serde_json::from_slice(&output.stdout)
-            .context("Failed to parse ffprobe output")?;
+        let probe: FfprobeOutput =
+            serde_json::from_slice(&output.stdout).context("Failed to parse ffprobe output")?;
 
         let mut width = 0u32;
         let mut height = 0u32;
@@ -117,7 +119,8 @@ mod video_metadata {
 
         let duration = stream_duration
             .or_else(|| {
-                probe.format
+                probe
+                    .format
                     .as_ref()
                     .and_then(|f| f.duration.as_ref())
                     .and_then(|d| d.parse().ok())
@@ -132,21 +135,30 @@ mod video_metadata {
     }
 
     pub async fn get_duration_from_url(url: &str, original_url: &str) -> Result<u32, MyError> {
-        if original_url.contains("youtube.com") || original_url.contains("youtu.be") {
-            if let Ok(duration) = get_youtube_duration(original_url).await {
-                log::debug!("Scraped YouTube duration for {}: {}s", original_url, duration);
-                return Ok(duration);
-            }
+        if (original_url.contains("youtube.com") || original_url.contains("youtu.be"))
+            && let Ok(duration) = get_youtube_duration(original_url).await
+        {
+            log::debug!(
+                "Scraped YouTube duration for {}: {}s",
+                original_url,
+                duration
+            );
+            return Ok(duration);
         }
 
         let output = Command::new("ffprobe")
             .args([
-                "-v", "error",
-                "-print_format", "json",
+                "-v",
+                "error",
+                "-print_format",
+                "json",
                 "-show_format",
-                "-user_agent", "Fulturate/6.6.6 (rust) (+https://github.com/weever1337/fulturate-rs)",
-                "-analyzeduration", "15000000",
-                "-probesize", "15000000",
+                "-user_agent",
+                "Fulturate/6.6.6 (rust) (+https://github.com/weever1337/fulturate-rs)",
+                "-analyzeduration",
+                "15000000",
+                "-probesize",
+                "15000000",
             ])
             .arg(url)
             .output()
@@ -158,10 +170,11 @@ mod video_metadata {
             return Err(anyhow::anyhow!("Failed to probe URL: {}", stderr));
         }
 
-        let probe: FfprobeOutput = serde_json::from_slice(&output.stdout)
-            .context("Failed to parse ffprobe output")?;
+        let probe: FfprobeOutput =
+            serde_json::from_slice(&output.stdout).context("Failed to parse ffprobe output")?;
 
-        let duration = probe.format
+        let duration = probe
+            .format
             .as_ref()
             .and_then(|f| f.duration.as_ref())
             .and_then(|d| d.parse::<f64>().ok())
@@ -169,11 +182,16 @@ mod video_metadata {
 
         log::debug!("ffprobe duration for {}: {}s", url, duration);
 
-        if duration < 15 && (original_url.contains("youtube.com") || original_url.contains("youtu.be")) {
-             if let Ok(scraped) = get_youtube_duration(original_url).await {
-                 log::debug!("ffprobe gave suspicious {}s, scraped YT duration: {}s", duration, scraped);
-                 return Ok(scraped);
-             }
+        if duration < 15
+            && (original_url.contains("youtube.com") || original_url.contains("youtu.be"))
+            && let Ok(scraped) = get_youtube_duration(original_url).await
+        {
+            log::debug!(
+                "ffprobe gave suspicious {}s, scraped YT duration: {}s",
+                duration,
+                scraped
+            );
+            return Ok(scraped);
         }
 
         Ok(duration)
@@ -187,13 +205,16 @@ mod video_metadata {
         let resp = client.get(url).send().await?.text().await?;
 
         let re = regex::Regex::new(r#""lengthSeconds":\s*"?(\d+)"?"#).unwrap();
-        if let Some(caps) = re.captures(&resp) {
-            if let Ok(seconds) = caps[1].parse::<u32>() {
-                return Ok(seconds);
-            }
+        if let Some(caps) = re.captures(&resp)
+            && let Ok(seconds) = caps[1].parse::<u32>()
+        {
+            return Ok(seconds);
         }
 
-        log::debug!("Could not find duration in YouTube page, length of response: {}", resp.len());
+        log::debug!(
+            "Could not find duration in YouTube page, length of response: {}",
+            resp.len()
+        );
         Err(anyhow::anyhow!("Could not find duration in YouTube page"))
     }
 
@@ -205,14 +226,15 @@ mod video_metadata {
         let thumb_path = output_dir.join(format!("{}_thumb.jpg", file_hash));
 
         let output = Command::new("ffmpeg")
-            .args([
-                "-i",
-            ])
+            .args(["-i"])
             .arg(video_path)
             .args([
-                "-ss", "00:00:01",
-                "-vframes", "1",
-                "-vf", "scale=320:320:force_original_aspect_ratio=decrease",
+                "-ss",
+                "00:00:01",
+                "-vframes",
+                "1",
+                "-vf",
+                "scale=320:320:force_original_aspect_ratio=decrease",
                 "-y",
             ])
             .arg(&thumb_path)
@@ -256,9 +278,19 @@ fn build_results_from_media(
     match media {
         DownloadResult::Video { duration, .. } => {
             // дебаг пусть этот останется, пригодится
-            log::debug!("Building video result: duration={:?}s, limit={}s", duration, MAX_DURATION_SECONDS);
-            if let Some(d) = duration && d > MAX_DURATION_SECONDS {
-                log::debug!("Video too long ({} > {}), returning error article", d, MAX_DURATION_SECONDS);
+            log::debug!(
+                "Building video result: duration={:?}s, limit={}s",
+                duration,
+                MAX_DURATION_SECONDS
+            );
+            if let Some(d) = duration
+                && d > MAX_DURATION_SECONDS
+            {
+                log::debug!(
+                    "Video too long ({} > {}), returning error article",
+                    d,
+                    MAX_DURATION_SECONDS
+                );
                 let minutes = MAX_DURATION_SECONDS / 60;
                 let error_article = InlineQueryResultArticle::new(
                     "error_duration",
@@ -367,24 +399,26 @@ pub async fn handle_cobalt_inline(
             original_url,
             ..
         } = &mut download_result
+            && duration.is_none()
         {
-            if duration.is_none() {
-                log::debug!("Cache hit but duration missing for {}, probing...", download_url);
-                match video_metadata::get_duration_from_url(download_url, &original_url).await {
-                    Ok(d) => {
-                        log::debug!("Probed duration: {}s", d);
-                        *duration = Some(d);
-                        let _ = redis
-                            .set(
-                                &cache_key,
-                                &CobaltCache::Pending(download_result.clone()),
-                                24 * 60 * 60,
-                            )
-                            .await;
-                    }
-                    Err(e) => {
-                        log::warn!("Failed to probe cached video: {}", e);
-                    }
+            log::debug!(
+                "Cache hit but duration missing for {}, probing...",
+                download_url
+            );
+            match video_metadata::get_duration_from_url(download_url, original_url).await {
+                Ok(d) => {
+                    log::debug!("Probed duration: {}s", d);
+                    *duration = Some(d);
+                    let _ = redis
+                        .set(
+                            &cache_key,
+                            &CobaltCache::Pending(download_result.clone()),
+                            24 * 60 * 60,
+                        )
+                        .await;
+                }
+                Err(e) => {
+                    log::warn!("Failed to probe cached video: {}", e);
                 }
             }
         }
@@ -486,7 +520,9 @@ pub async fn handle_inline_video(
             duration,
             ..
         })) => {
-            if let Some(d) = duration && d > MAX_DURATION_SECONDS {
+            if let Some(d) = duration
+                && d > MAX_DURATION_SECONDS
+            {
                 let minutes = MAX_DURATION_SECONDS / 60;
                 bot.edit_message_text_inline(
                     &inline_message_id,
@@ -541,20 +577,21 @@ pub async fn handle_inline_video(
                 .get_download_url()
                 .ok_or_else(|| anyhow!("Cobalt returned no download URL (Picker or Error?)"))?;
 
-            if let Ok(duration) = video_metadata::get_duration_from_url(&download_url, &original_url).await {
-                if duration > MAX_DURATION_SECONDS {
-                    let minutes = MAX_DURATION_SECONDS / 60;
-                    bot.edit_message_text_inline(
-                        &inline_message_id,
-                        t!(
-                            "modules.cobalt.error_too_long",
-                            locale = &locale,
-                            minutes = minutes
-                        ),
-                    )
-                    .await?;
-                    return Ok(());
-                }
+            if let Ok(duration) =
+                video_metadata::get_duration_from_url(&download_url, &original_url).await
+                && duration > MAX_DURATION_SECONDS
+            {
+                let minutes = MAX_DURATION_SECONDS / 60;
+                bot.edit_message_text_inline(
+                    &inline_message_id,
+                    t!(
+                        "modules.cobalt.error_too_long",
+                        locale = &locale,
+                        minutes = minutes
+                    ),
+                )
+                .await?;
+                return Ok(());
             }
 
             let http_client = reqwest::Client::builder()
@@ -635,16 +672,24 @@ pub async fn handle_inline_video(
 
             let _guard = TempGuard { path: path.clone() };
 
-            let meta = video_metadata::get_from_file(&path).await.unwrap_or_else(|e| {
-                log::warn!("Failed to get metadata from file: {}", e);
-                video_metadata::VideoMetadata {
-                    duration: 0,
-                    width: 0,
-                    height: 0,
-                }
-            });
+            let meta = video_metadata::get_from_file(&path)
+                .await
+                .unwrap_or_else(|e| {
+                    log::warn!("Failed to get metadata from file: {}", e);
+                    video_metadata::VideoMetadata {
+                        duration: 0,
+                        width: 0,
+                        height: 0,
+                    }
+                });
 
-            log::debug!("Post-download metadata for {}: duration={}s, width={}, height={}", original_url, meta.duration, meta.width, meta.height);
+            log::debug!(
+                "Post-download metadata for {}: duration={}s, width={}, height={}",
+                original_url,
+                meta.duration,
+                meta.width,
+                meta.height
+            );
 
             if meta.duration > MAX_DURATION_SECONDS {
                 let minutes = MAX_DURATION_SECONDS / 60;

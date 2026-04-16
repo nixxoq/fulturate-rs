@@ -5,8 +5,8 @@ use crate::{
         db::schemas::{group::Group, settings::Settings, user::User},
     },
     errors::MyError,
-    util::i18n::get_locale_by_id,
     t,
+    util::i18n::get_locale_by_id,
 };
 use log::info;
 use mongodb::bson::doc;

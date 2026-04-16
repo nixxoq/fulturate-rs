@@ -16,7 +16,10 @@ pub async fn handle_whisper_callback(
     q: CallbackQuery,
     config: &Config,
 ) -> Result<(), MyError> {
-    let data = q.data.as_ref().ok_or_else(|| anyhow!("Callback query data is empty"))?;
+    let data = q
+        .data
+        .as_ref()
+        .ok_or_else(|| anyhow!("Callback query data is empty"))?;
 
     let parts: Vec<&str> = data.split('_').collect();
     if parts.len() != 3 || parts[0] != "whisper" {
